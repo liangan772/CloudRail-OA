@@ -470,4 +470,32 @@ describe('真实库 e2e · 全链路', () => {
     expect(Array.isArray(res.body.data.hits)).toBe(true);
     expect(res.body.data.errors).toEqual([]);
   });
+
+  it('审计与发件箱：手动派发后事件落成站内通知，Outbox 无积压', async () => {
+    // 事务里写的 Outbox 事件由派发器投递；这里手动触发一次，避免依赖定时器时序
+    const run = await http()
+      .post('/jobs/run')
+      .set('Authorization', `Bearer ${await token(ADMIN)}`)
+      .send({ job: 'outbox-dispatch' })
+      .expect(201);
+    expect(run.body.data.job).toBe('outbox-dispatch');
+    expect(run.body.data.tenants).toBeGreaterThan(0);
+
+    const status = await http()
+      .get('/jobs/status')
+      .set('Authorization', `Bearer ${await token(ADMIN)}`)
+      .expect(200);
+    // 本机没有 Redis → 应自动退回进程内定时器模式，功能不降级
+    expect(status.body.data.mode).toBe('in-process');
+    expect(status.body.data.outbox.pending).toBe(0);
+
+    // 王强是技术部发起人：至少应收到"待你投票"一类的站内通知
+    const notifications = await http()
+      .get('/notifications')
+      .set('Authorization', `Bearer ${await token(WANGQIANG)}`)
+      .expect(200);
+    expect(notifications.body.data.total).toBeGreaterThan(0);
+    const types = (notifications.body.data.items as Array<{ type: string }>).map((item) => item.type);
+    expect(types).toEqual(expect.arrayContaining(['VOTE_PENDING']));
+  });
 });

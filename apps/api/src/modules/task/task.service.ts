@@ -1,9 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import {
+  WS_EVENTS,
+  WS_ROOMS,
   type AssigneeRuleType,
   type TaskStatus,
 } from '@oa/shared';
+import { DomainEventService } from '../../infra/events/domain-event.service';
 import { PrismaService } from '../../infra/prisma/prisma.service';
 import { AppError } from '../../common/errors/app-error';
 import type { AuthenticatedUser } from '../../common/context/authenticated-user';
@@ -47,6 +50,7 @@ export class TaskService {
     private readonly numbering: NumberingService,
     private readonly advance: InstanceAdvanceService,
     private readonly contexts: NodeContextService,
+    private readonly events: DomainEventService,
   ) {}
 
   /**
@@ -166,6 +170,46 @@ export class TaskService {
       });
 
       taskIds.push(created.id);
+
+      await this.events.emit(tx, {
+        tenantId: params.tenantId,
+        eventType: WS_EVENTS.TASK_CREATED,
+        aggregateType: 'TASK',
+        aggregateId: created.id,
+        payload: { code, title: template.title, ownerId: assignment.ownerId, acceptorId: assignment.acceptorId, instanceId: params.instanceId },
+        rooms: [WS_ROOMS.instance(params.instanceId)],
+        notifications: [
+          ...(assignment.ownerId != null
+            ? [
+                {
+                  userId: assignment.ownerId,
+                  type: 'TASK_ASSIGNED' as const,
+                  title: `待你处理：${template.title}`,
+                  content: `来源：${assignment.ownerReason}`,
+                  link: `/tasks/${created.id}`,
+                },
+              ]
+            : []),
+          ...(assignment.acceptorId != null
+            ? [
+                {
+                  userId: assignment.acceptorId,
+                  type: 'TASK_ASSIGNED' as const,
+                  title: `待你验收：${template.title}`,
+                  content: `来源：${assignment.acceptorReason}`,
+                  link: `/tasks/${created.id}`,
+                },
+              ]
+            : []),
+        ],
+        audit: {
+          actorId: params.creatorId,
+          action: 'TASK_CREATE',
+          targetType: 'Task',
+          targetId: created.id,
+          after: { code, title: template.title, mode: assignment.mode, owner: assignment.ownerId },
+        },
+      });
     }
 
     return { taskIds, skipped, openTasks: taskIds.length };
@@ -277,6 +321,32 @@ export class TaskService {
       }, comment);
 
       const advanced = await this.maybeAdvanceInstance(tx, user, task);
+      await this.events.emit(tx, {
+        tenantId: user.tenantId,
+        eventType: WS_EVENTS.TASK_UPDATED,
+        aggregateType: 'TASK',
+        aggregateId: task.id,
+        payload: { status: transition.status, instanceId: task.instanceId },
+        rooms: [WS_ROOMS.instance(task.instanceId ?? 0)],
+        notifications: advanced.advanced
+          ? [
+              {
+                userId: task.assignees[0]?.userId ?? user.userId,
+                type: 'TASK_ASSIGNED' as const,
+                title: `本层任务已全部完成`,
+                content: '流程将自动进入下一层',
+                link: `/instances/${task.instanceId}`,
+              },
+            ]
+          : [],
+        audit: {
+          actorId: user.userId,
+          action: 'TASK_ACCEPTANCE_PASS',
+          targetType: 'Task',
+          targetId: task.id,
+          after: { status: transition.status, advanced: advanced.advanced },
+        },
+      });
       return {
         taskId: task.id,
         status: transition.status,
@@ -514,8 +584,54 @@ export class TaskService {
       await this.applyTransition(tx, user, task.id, task.status as TaskStatus, transition.status as TaskStatus, transition.actions, patch, comment);
       if (after) await after(tx, task, transition);
 
+      // 任务的所有生命周期动作都走同一条出口：审计 + 发件箱（WS 广播由派发器完成）
+      await this.events.emit(tx, {
+        tenantId: user.tenantId,
+        eventType: WS_EVENTS.TASK_UPDATED,
+        aggregateType: 'TASK',
+        aggregateId: task.id,
+        payload: { event, status: transition.status, instanceId: task.instanceId, comment },
+        rooms: [WS_ROOMS.instance(task.instanceId ?? 0)],
+        notifications: this.notificationsFor(event, task, user),
+        audit: {
+          actorId: user.userId,
+          action: `TASK_${event}`,
+          targetType: 'Task',
+          targetId: task.id,
+          before: { status: task.status },
+          after: { status: transition.status, comment },
+        },
+      });
+
       return { taskId: task.id, status: transition.status, appliedEvents: [event], reason: transition.reason };
     });
+  }
+
+  /** 哪些任务动作需要主动通知谁（其余动作只广播，不打扰人） */
+  private notificationsFor(
+    event: TaskEvent,
+    task: { id: number; assignees: { userId: number; role: string; isActive: boolean }[] },
+    actor: AuthenticatedUser,
+  ): { userId: number; type: 'TASK_ASSIGNED' | 'TASK_OVERDUE'; title: string; link: string }[] {
+    const owner = task.assignees.find((item) => item.role === 'OWNER' && item.isActive)?.userId;
+    const acceptor = task.assignees.find((item) => item.role === 'ACCEPTOR' && item.isActive)?.userId;
+    const target =
+      event === 'ASSIGN' || event === 'TRANSFER'
+        ? owner
+        : event === 'SUBMIT'
+          ? acceptor
+          : event === 'ACCEPTANCE_REJECT'
+            ? owner
+            : null;
+    if (target == null || target === actor.userId) return [];
+
+    const titles: Partial<Record<TaskEvent, string>> = {
+      ASSIGN: '有新任务分配给你',
+      TRANSFER: '有任务转派给你',
+      SUBMIT: '有任务待你验收',
+      ACCEPTANCE_REJECT: '任务验收未通过，已打回',
+    };
+    return [{ userId: target, type: 'TASK_ASSIGNED', title: titles[event] ?? '任务有更新', link: `/tasks/${task.id}` }];
   }
 
   private async applyTransition(

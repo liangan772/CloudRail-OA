@@ -195,6 +195,7 @@ function buildService(prisma: unknown, escalation?: { matched: unknown[]; errors
     new NodeContextService(prisma as never),
     rules as never,
     escalations as never,
+    { emit: jest.fn(), emitStandalone: jest.fn() } as never,
   );
 }
 

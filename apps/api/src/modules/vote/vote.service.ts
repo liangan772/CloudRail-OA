@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import {
+  WS_EVENTS,
+  WS_ROOMS,
   describeVoteRule,
   round4,
   type EscalationTrigger,
@@ -19,6 +21,7 @@ import { NodeContextService, type NodeContext, type Tx } from './node-context.se
 import { RuleEngineService } from '../rule/rule-engine.service';
 import type { EscalationEvaluationResult } from '../../domain/rule/rule-engine';
 import { EscalationService } from '../escalation/escalation.service';
+import { DomainEventService } from '../../infra/events/domain-event.service';
 import type { CastVoteBody, MarkAbsentBody, RevokeAbsentBody } from './vote.dto';
 
 /** 池内已表态人数（VOTED / DELEGATED） */
@@ -33,6 +36,7 @@ export class VoteService {
     private readonly contexts: NodeContextService,
     private readonly rules: RuleEngineService,
     private readonly escalations: EscalationService,
+    private readonly events: DomainEventService,
   ) {}
 
   /* ---------------------------- 投票 / 改票 ---------------------------- */
@@ -94,6 +98,29 @@ export class VoteService {
       });
 
       const applied = await this.recomputeAndApply(tx, ctx, user);
+
+      await this.events.emit(tx, {
+        tenantId: user.tenantId,
+        eventType: WS_EVENTS.VOTE_CAST,
+        aggregateType: 'NODE',
+        aggregateId: ctx.node.id,
+        payload: {
+          instanceId,
+          voterId: user.userId,
+          decision: input.decision,
+          isRevote,
+          stated: applied.progress.stated,
+          pool: applied.progress.pool,
+        },
+        rooms: [WS_ROOMS.instance(instanceId)],
+        audit: {
+          actorId: user.userId,
+          action: isRevote ? 'VOTE_REVOTE' : 'VOTE_CAST',
+          targetType: 'InstanceNode',
+          targetId: ctx.node.id,
+          after: { decision: input.decision, revoteSeq: created.revoteSeq },
+        },
+      });
 
       return {
         instanceId,
@@ -161,6 +188,27 @@ export class VoteService {
       });
 
       const applied = await this.recomputeAndApply(tx, ctx, user, guard.status as string);
+
+      await this.events.emit(tx, {
+        tenantId: user.tenantId,
+        eventType: WS_EVENTS.INSTANCE_UPDATED,
+        aggregateType: 'NODE',
+        aggregateId: ctx.node.id,
+        payload: {
+          instanceId,
+          action: 'MARK_ABSENT',
+          absentUserIds: [...targets],
+          status: applied.nodeStatus,
+        },
+        rooms: [WS_ROOMS.instance(instanceId)],
+        audit: {
+          actorId: user.userId,
+          action: 'VOTE_MARK_ABSENT',
+          targetType: 'InstanceNode',
+          targetId: ctx.node.id,
+          after: { absentUserIds: [...targets], reason: input.reason, source: input.source },
+        },
+      });
 
       return {
         instanceId,
@@ -497,6 +545,24 @@ export class VoteService {
       await tx.escalation.update({
         where: { id: ctx.node.escalationId },
         data: { status: 'PENDING_CONCLUSION' },
+      });
+    }
+    if (enteredConclusion && ctx.node.escalationId == null) {
+      // 进入结论阶段：通知结论填写人（填写人解析在结论接口里再校验一次，这里只做提醒）
+      await this.events.emit(tx, {
+        tenantId: ctx.instance.tenantId,
+        eventType: WS_EVENTS.CONCLUSION_PENDING,
+        aggregateType: 'NODE',
+        aggregateId: ctx.node.id,
+        payload: { instanceId: ctx.instance.id, systemDecision: decision.tally.systemDecision },
+        rooms: [WS_ROOMS.instance(ctx.instance.id)],
+        audit: {
+          actorId: user.userId,
+          action: 'CONCLUSION_PENDING',
+          targetType: 'InstanceNode',
+          targetId: ctx.node.id,
+          after: { systemDecision: decision.tally.systemDecision },
+        },
       });
     }
     if (enteredConclusion) {

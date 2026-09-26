@@ -10,6 +10,10 @@ import { VoteModule } from './modules/vote/vote.module';
 import { RuleModule } from './modules/rule/rule.module';
 import { EscalationModule } from './modules/escalation/escalation.module';
 import { TaskModule } from './modules/task/task.module';
+import { JobsModule } from './modules/jobs/jobs.module';
+import { NotificationModule } from './modules/notification/notification.module';
+import { GatewayModule } from './gateway/gateway.module';
+import { OutboxModule } from './infra/outbox/outbox.module';
 import { HealthController } from './modules/health/health.controller';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from './modules/auth/guards/permissions.guard';
@@ -20,6 +24,8 @@ import { DataScopeGuard } from './modules/auth/guards/data-scope.guard';
     // 仓库根目录放 .env；CWD 在 apps/api 时用 ../../.env 兜底
     ConfigModule.forRoot({ isGlobal: true, cache: true, envFilePath: ['.env', '../../.env'] }),
     PrismaModule,
+    // 审计 + 发件箱（全局）：C9 四点式落库的基础设施
+    OutboxModule,
     AuthModule,
     OrgModule,
     WorkflowTemplateModule,
@@ -28,6 +34,9 @@ import { DataScopeGuard } from './modules/auth/guards/data-scope.guard';
     RuleModule,
     EscalationModule,
     TaskModule,
+    JobsModule,
+    NotificationModule,
+    GatewayModule,
   ],
   controllers: [HealthController],
   providers: [

@@ -7,6 +7,8 @@ import {
   type WorkNoMissingPolicy,
   type WriteBackAction,
 } from '@oa/shared';
+import { WS_EVENTS, WS_ROOMS } from '@oa/shared';
+import { DomainEventService } from '../../infra/events/domain-event.service';
 import { PrismaService } from '../../infra/prisma/prisma.service';
 import { AppError } from '../../common/errors/app-error';
 import type { AuthenticatedUser } from '../../common/context/authenticated-user';
@@ -80,6 +82,7 @@ export class EscalationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly numbering: NumberingService,
+    private readonly events: DomainEventService,
   ) {}
 
   /** 建上报单：解析目标 → 建单 → 冻结原流程 → （AUTO）创建上级投票节点并开投 */
@@ -199,6 +202,49 @@ export class EscalationService {
       status = 'VOTING';
     }
 
+    // 通知目标工号全部成员（D3：投递给工号，不是个人）
+    const targetMembers = await tx.departmentWorkNoMember.findMany({
+      where: { tenantId: input.tenantId, departmentId: resolved.target.toDeptId, status: 'ACTIVE' },
+      select: { userId: true },
+    });
+    await this.events.emit(tx, {
+      tenantId: input.tenantId,
+      eventType: WS_EVENTS.ESCALATION_CREATED,
+      aggregateType: 'ESCALATION',
+      aggregateId: escalation.id,
+      payload: {
+        code: escalation.code,
+        toWorkNo: resolved.target.toWorkNo,
+        level: 1,
+        triggerType: input.triggerType,
+        instanceId: instance.id,
+        status,
+      },
+      rooms: [
+        WS_ROOMS.instance(instance.id),
+        ...(resolved.target.toWorkNo ? [WS_ROOMS.workno(resolved.target.toWorkNo)] : []),
+      ],
+      notifications: targetMembers.map((member) => ({
+        userId: member.userId,
+        type: 'ESCALATION_CREATED' as const,
+        title: `新上报待受理：${escalation.code}`,
+        content: input.reason,
+        link: `/escalations/${escalation.id}`,
+      })),
+      audit: {
+        actorId: input.requestedBy,
+        action: 'ESCALATION_CREATE',
+        targetType: 'Escalation',
+        targetId: escalation.id,
+        after: {
+          triggerType: input.triggerType,
+          fromWorkNo: initiatorDept.workNo,
+          toWorkNo: resolved.target.toWorkNo,
+          hops: resolved.target.hops,
+        },
+      },
+    });
+
     return {
       escalationId: escalation.id,
       code: escalation.code,
@@ -236,6 +282,7 @@ export class EscalationService {
           upwardInstanceNodeId: true,
           frozenInstanceStatus: true,
           toDeptId: true,
+          requestedBy: true,
         },
       });
       if (!escalation) throw AppError.of('SYS_NOT_FOUND');
@@ -391,6 +438,39 @@ export class EscalationService {
           fromStatus: escalation.status as never,
           toStatus: written.status as never,
           comment: input.content,
+        },
+      });
+
+      await this.events.emit(tx, {
+        tenantId: user.tenantId,
+        eventType: WS_EVENTS.ESCALATION_HANDLED,
+        aggregateType: 'ESCALATION',
+        aggregateId: escalation.id,
+        payload: {
+          instanceId: escalation.instanceId,
+          writeBackAction,
+          instanceStatus,
+          escalationStatus: written.status,
+        },
+        rooms: [
+          WS_ROOMS.instance(escalation.instanceId),
+          ...(chain.workNo ? [WS_ROOMS.workno(chain.workNo)] : []),
+        ],
+        notifications: [
+          {
+            userId: escalation.requestedBy,
+            type: 'ESCALATION_HANDLED' as const,
+            title: `上级已处理你的上报：${writeBackAction}`,
+            content: input.content,
+            link: `/instances/${escalation.instanceId}`,
+          },
+        ],
+        audit: {
+          actorId: user.userId,
+          action: `ESCALATION_${writeBackAction}`,
+          targetType: 'Escalation',
+          targetId: escalation.id,
+          after: { writeBackAction, instanceStatus },
         },
       });
 

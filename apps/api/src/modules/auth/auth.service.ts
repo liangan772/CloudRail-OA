@@ -117,20 +117,29 @@ export class AuthService {
    * `RefreshToken { jti, userId, expiresAt, revokedAt, replacedByJti }` 表即可（见 README 的后续说明）。
    */
   async refresh(refreshToken: string): Promise<LoginResult> {
+    const payload = await this.verifyToken(refreshToken, 'refresh');
+    const user = await this.buildAuthenticatedUser(payload.sub, payload.tid);
+    return { tokens: await this.issueTokens(user), user };
+  }
+
+  /** 校验访问令牌（WS 握手等非 HTTP 场景复用同一套签发口径） */
+  async verifyAccessToken(token: string): Promise<{ sub: number; tid: number }> {
+    return this.verifyToken(token, 'access');
+  }
+
+  private async verifyToken(token: string, expected: 'access' | 'refresh'): Promise<{ sub: number; tid: number }> {
     let payload: { sub?: number; tid?: number; typ?: string };
     try {
-      payload = await this.jwt.verifyAsync<{ sub?: number; tid?: number; typ?: string }>(refreshToken, {
-        secret: this.refreshSecret,
+      payload = await this.jwt.verifyAsync<{ sub?: number; tid?: number; typ?: string }>(token, {
+        secret: expected === 'access' ? this.accessSecret : this.refreshSecret,
       });
     } catch {
       throw AppError.of('AUTH_TOKEN_EXPIRED');
     }
-    if (payload.typ !== 'refresh' || !payload.sub || !payload.tid) {
-      throw AppError.of('AUTH_TOKEN_INVALID', '刷新令牌类型不正确');
+    if (payload.typ !== expected || !payload.sub || !payload.tid) {
+      throw AppError.of('AUTH_TOKEN_INVALID', `${expected === 'access' ? '访问' : '刷新'}令牌类型不正确`);
     }
-
-    const user = await this.buildAuthenticatedUser(payload.sub, payload.tid);
-    return { tokens: await this.issueTokens(user), user };
+    return { sub: payload.sub, tid: payload.tid };
   }
 
   /** 登出：无状态实现，仅作为客户端丢弃令牌的确认点 */

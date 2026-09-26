@@ -131,6 +131,8 @@ function buildService(prisma: unknown): InstanceService {
     prisma as never,
     new VoterDirectoryService(prisma as never),
     new NumberingService(prisma as never),
+    // 审计 + 发件箱：单测只关心"有没有写"，用替身即可
+    { emit: jest.fn(), emitStandalone: jest.fn() } as never,
   );
 }
 

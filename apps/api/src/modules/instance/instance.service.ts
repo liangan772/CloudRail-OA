@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { round4, type CreateInstanceInput } from '@oa/shared';
+import { WS_EVENTS, WS_ROOMS, round4, type CreateInstanceInput } from '@oa/shared';
+import { DomainEventService } from '../../infra/events/domain-event.service';
 import { PrismaService } from '../../infra/prisma/prisma.service';
 import { AppError } from '../../common/errors/app-error';
 import type { AuthenticatedUser } from '../../common/context/authenticated-user';
@@ -20,6 +21,7 @@ export class InstanceService {
     private readonly prisma: PrismaService,
     private readonly directory: VoterDirectoryService,
     private readonly numbering: NumberingService,
+    private readonly events: DomainEventService,
   ) {}
 
   private scopeOf(user: AuthenticatedUser): ScopePredicate {
@@ -177,6 +179,30 @@ export class InstanceService {
       await tx.workflowInstance.update({
         where: { id: instance.id },
         data: { currentNodeId: node.id },
+      });
+
+      // C9 四点式：状态变更 + 审计 + 发件箱在同一事务（WS 广播由 Outbox 派发器完成）
+      await this.events.emit(tx, {
+        tenantId: user.tenantId,
+        eventType: WS_EVENTS.INSTANCE_UPDATED,
+        aggregateType: 'INSTANCE',
+        aggregateId: instance.id,
+        payload: { code, status: submit.status, nodeId: node.id, layerIndex, title: input.title },
+        rooms: [WS_ROOMS.instance(instance.id)],
+        notifications: resolution.voters.map((voter) => ({
+          userId: voter.userId,
+          type: 'VOTE_PENDING' as const,
+          title: `待你投票：${input.title}`,
+          content: `第 1 层投票已开启（${code}）`,
+          link: `/instances/${instance.id}`,
+        })),
+        audit: {
+          actorId: user.userId,
+          action: 'INSTANCE_CREATE',
+          targetType: 'WorkflowInstance',
+          targetId: instance.id,
+          after: { code, title: input.title, voters: resolution.voters.length },
+        },
       });
 
       return { instance, node };

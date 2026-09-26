@@ -4,6 +4,8 @@ import { PrismaService } from '../../infra/prisma/prisma.service';
 import { AppError } from '../../common/errors/app-error';
 import type { AuthenticatedUser } from '../../common/context/authenticated-user';
 import { submitConclusion as buildConclusion } from '../../domain/workflow/conclusion-policy';
+import { WS_EVENTS, WS_ROOMS } from '@oa/shared';
+import { DomainEventService } from '../../infra/events/domain-event.service';
 import { InstanceAdvanceService } from '../instance/instance-advance.service';
 import { TaskService } from '../task/task.service';
 import { NodeContextService, type NodeContext, type Tx } from './node-context.service';
@@ -25,6 +27,7 @@ export class ConclusionService {
     private readonly contexts: NodeContextService,
     private readonly advance: InstanceAdvanceService,
     private readonly tasks: TaskService,
+    private readonly events: DomainEventService,
   ) {}
 
   /**
@@ -118,6 +121,39 @@ export class ConclusionService {
             summary: `本层通过，已派发 ${created.taskIds.length} 个任务，任务全部完成后自动进入下一层`,
           }
         : await this.advance.advance(tx, ctx, user, built.nodeStatus);
+
+      await this.events.emit(tx, {
+        tenantId: user.tenantId,
+        eventType: built.nodeStatus === 'PASSED' ? WS_EVENTS.NODE_PASSED : WS_EVENTS.NODE_REJECTED,
+        aggregateType: 'NODE',
+        aggregateId: ctx.node.id,
+        payload: {
+          instanceId: ctx.instance.id,
+          instanceStatus: advanced.instanceStatus,
+          heldByTasks,
+          tasksCreated: created.taskIds.length,
+        },
+        rooms: [WS_ROOMS.instance(ctx.instance.id)],
+        notifications:
+          heldByTasks || advanced.finalStatus === null
+            ? []
+            : [
+                {
+                  userId: ctx.instance.initiatorId,
+                  type: 'INSTANCE_FINISHED' as const,
+                  title: `流程${advanced.finalStatus === 'APPROVED' ? '通过' : '驳回'}：${ctx.instance.title}`,
+                  content: advanced.summary,
+                  link: `/instances/${ctx.instance.id}`,
+                },
+              ],
+        audit: {
+          actorId: user.userId,
+          action: 'NODE_CONCLUDE',
+          targetType: 'InstanceNode',
+          targetId: ctx.node.id,
+          after: { decision: built.conclusion.decision, isOverride: built.isOverride },
+        },
+      });
 
       return {
         instanceId,

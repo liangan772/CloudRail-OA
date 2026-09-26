@@ -31,7 +31,17 @@
 | 0 | 需求澄清、信息架构、技术选型、数据模型草案 | `ROADMAP.md`、`docs/stage-0/*`（含 Q1–Q27 冻结基线） | ✅ 已完成，等待「进入阶段 1」指令 |
 | 1 | Prisma Schema、共享类型与枚举、种子数据 | `apps/api/prisma/schema.prisma`（44 模型/41 枚举/75 索引）、`packages/shared`（枚举+常量+DSL）、幂等 seed、脚手架、`prisma/migrations/*` | ✅ 已完成：`validate`/`generate`/typecheck 全绿；**migrate + seed 已对宝塔 PostgreSQL 16.3 实跑通过**（init 迁移 + 部分索引迁移；种子 1 租户/3 部门/8 工号成员/9 用户/5 角色/36 权限/2 模板/3 序列） |
 | 2 | 后端核心：Auth、Org、Workflow、VoteEngine、NodeStateMachine、RuleEngine、**投票结论（VoteConclusion）** | 可运行的 API + 单测（计票/全员表态/结论/状态机/规则求值） | ✅ **已完成并已对真实库验收**：Auth（JWT + 三级守卫）、Org、Workflow 模板发布与图校验、实例发起与投票人快照、投票/改票、标记缺席、人工结论与层级推进、RuleEngine 条件上报；22 条路由 + Swagger + `/health` `/metrics`；**195 个单测（16 套件）+ 11 个真实库 e2e 全绿**。任务引擎属阶段 3 |
-| 3 | 后端扩展：TaskEngine、EscalationEngine（逐级 + 上级投票复用同一 `VoteEngine`）、BullMQ、WebSocket、审计、Outbox | 队列消费者 + 网关 + 审计与发件箱 | 🚧 进行中：**EscalationEngine ✅**（目标解析/上报状态机/建单冻结/投递即开投/逐级上溯/结论回写）、**TaskEngine ✅**（任务状态机 + 分配解析 + 服务层与 15 个接口，真库 e2e 验证了"派任务 → 接单 → 勾检查项 → 提交 → 验收 → 自动开下一层"）；待做 BullMQ 定时（超时/催办/逾期）、Socket.IO、审计与 Outbox |
+| 3 | 后端扩展：TaskEngine、EscalationEngine（逐级 + 上级投票复用同一 `VoteEngine`）、BullMQ、WebSocket、审计、Outbox | 队列消费者 + 网关 + 审计与发件箱 | ✅ **已完成**：EscalationEngine（目标解析 / 上报状态机 / 建单冻结 / 投递即开投 / 逐级上溯 / 结论回写）、TaskEngine（状态机 + 分配解析 + 15 个接口）、**审计 + Outbox + 派发器**（四点式落库）、**Socket.IO 网关**（房间 `instance:` / `workno:` / `user:` / `dept:`，令牌鉴权）、**BullMQ 定时**（无 Redis 自动退回进程内定时器）；**14 个真实库 e2e 全绿**、248 个单测全绿。遗留项见下表 |
+
+### 阶段 3 的已知遗留（不阻塞主线）
+
+| # | 项 | 说明 |
+| --- | --- | --- |
+| 1 | 上报平票（TIE）自动上溯 | 目前平票进入 `PENDING_CONCLUSION` 由上级结论处理；D9 的"平票即上溯"只实现了超时路径 |
+| 2 | 任务依赖的模板声明 | `TaskDependency` 与状态机都支持依赖，但模板还不能直接声明"任务 B 依赖任务 A" |
+| 3 | 通知渠道 | 站内通知已打通；邮件 / 短信 / IM 的适配器按计划留到阶段 6 |
+| 4 | 审计日志按月分区 | schema 里已是普通表，分区在建库脚本里按计划留到上线前（阶段 6） |
+| 5 | WS 的自动化验证 | 未装 `socket.io-client`，网关目前靠"事件确实进了 Outbox 并被派发"间接验证 |
 
 ### 阶段 3 实现时发现的一处文档冲突（已按最高优先级约束实现）
 

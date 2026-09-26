@@ -92,3 +92,32 @@ pnpm --filter @oa/api test:e2e                     # 会起 127.0.0.1:3099 的�
 | `src/infra/**` | 基础设施（Prisma 等） |
 | `src/common/**` | 错误、过滤器、拦截器、管道、装饰器、请求上下文 |
 | `test/e2e/**` | 真实库端到端测试与编排脚本 |
+
+## 实时通道与后台任务
+
+### Socket.IO（`/ws` 命名空间）
+
+握手时用访问令牌鉴权（`auth.token`、`Authorization: Bearer` 或 `?token=` 均可），
+连接后自动加入房间：`user:{id}`、`dept:{id}`，以及该用户所属部门工号的 `workno:{工号}`
+（上报是投递给工号而不是个人，见 D3）。业务事件名与房间名都在 `@oa/shared` 的 `WS_EVENTS` / `WS_ROOMS` 里，
+前后端不会漂移。
+
+### 后台任务
+
+周期任务有四个：`outbox-dispatch`（5s）、`vote-timeout` / `conclusion-timeout` / `escalation-timeout`（各 5min）。
+
+| 模式 | 触发条件 | 说明 |
+| --- | --- | --- |
+| `queue` | 配置了可用 `REDIS_URL` | 走 BullMQ（可多实例），repeatable job |
+| `in-process` | 未配置或连不上 Redis | 退回进程内定时器，**功能不降级**（单机部署不需要 broker） |
+
+```bash
+GET  /jobs/status    # 当前模式、各任务周期、Outbox 积压（需 AUDIT_READ）
+POST /jobs/run       # 手动触发一次：{"job":"outbox-dispatch"}（排障与联调，不依赖队列）
+```
+
+### 审计与发件箱（C9 四点式）
+
+所有状态变更在**同一个事务**里写 `AuditLog` + `OutboxEvent`，由派发器投递到
+Socket.IO 广播与站内通知（`GET /notifications`、`POST /notifications/:id/read`、`POST /notifications/read-all`）。
+派发器先认领（PENDING → PROCESSING）再投递，失败按 2^n 秒退避重试，超过 5 次标 `DEAD` 供人工重放。
