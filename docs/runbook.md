@@ -30,7 +30,18 @@ docker compose --env-file .env -f docker/docker-compose.prod.yml up -d --build
 #   docker compose --env-file .env -f docker/docker-compose.prod.yml --profile tls up -d
 
 # 首次灌种子（幂等，可重复执行）
+# ⚠️ 这一步作用于 **compose 自带的 postgres 容器**（服务名 postgres / 容器名 oa-postgres），
+#    与你之前在别处（例如宝塔面板里的 PostgreSQL 应用）灌过的种子互不相干——那是另一套库。
+#    只跑迁移不跑这一步，登录会返回 AUTH_INVALID_CREDENTIALS（detail 为"租户不存在或已停用"）。
 docker compose --env-file .env -f docker/docker-compose.prod.yml exec api pnpm db:seed
+
+# 若上面报 "tsx: not found"（Prisma 的 seed 包装器在某些环境找不到 tsx），直接跑脚本：
+# docker compose --env-file .env -f docker/docker-compose.prod.yml exec api \
+#   pnpm --filter @oa/api exec tsx prisma/seed/index.ts
+
+# 验证种子是否落库（期望 tenants=1 / users=9）
+docker compose --env-file .env -f docker/docker-compose.prod.yml exec postgres \
+  psql -U oa -d oa -c 'select (select count(*) from tenants) tenants, (select count(*) from users) users;'
 ```
 
 `api` 容器启动时会先跑 `prisma migrate deploy` 再起服务，所以迁移不需要手工执行。
