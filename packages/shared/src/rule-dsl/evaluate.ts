@@ -193,7 +193,7 @@ function checkLimits(node: RuleNode, depth: number, counter: { n: number }, opts
   } else if ('or' in node && Array.isArray(node.or)) {
     for (const child of node.or) checkLimits(child, depth + 1, counter, opts);
   } else if ('not' in node) {
-    checkLimits(node.not, depth + 1, counter, opts);
+    checkLimits(node.not as RuleNode, depth + 1, counter, opts);
   }
 }
 
@@ -226,7 +226,7 @@ function evalNode(rule: RuleNode, ctx: Record<string, unknown>): boolean {
     return rule.or.some((child) => evalNode(child, ctx));
   }
   if ('not' in rule) {
-    return !evalNode(rule.not, ctx);
+    return !evalNode(rule.not as RuleNode, ctx);
   }
   return evalComparison(rule as RuleComparison, ctx).result;
 }
@@ -256,7 +256,7 @@ function explainNode(rule: RuleNode, ctx: Record<string, unknown>): ExplainNode 
     return { type: 'or', result: children.some((c) => c.result), children };
   }
   if ('not' in rule) {
-    const child = explainNode(rule.not, ctx);
+    const child = explainNode(rule.not as RuleNode, ctx);
     return { type: 'not', result: !child.result, children: [child] };
   }
   const { result, op, path, left, right } = evalComparison(rule as RuleComparison, ctx);

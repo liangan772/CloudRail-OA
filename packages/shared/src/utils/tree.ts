@@ -40,40 +40,41 @@ export function subtreePrefix(path: string): string {
   return `${path.replace(/\/+$/, '')}/%`;
 }
 
+/** 带子节点的递归类型（避免 children 类型不自洽） */
+export type TreeNode<T> = T & { children: TreeNode<T>[] };
+
 export interface BuildTreeOptions<T extends TreeNodeLike> {
-  childrenKey?: string;
   sort?: (a: T, b: T) => number;
 }
 
-/** 平铺列表 → 树（前端组织架构页与部门选择器共用） */
-export function buildTree<T extends TreeNodeLike>(nodes: T[], options: BuildTreeOptions<T> = {}): (T & { children: T[] })[] {
-  const childrenKey = options.childrenKey ?? 'children';
-  const map = new Map<number, T & { children: T[] }>();
-  const roots: (T & { children: T[] })[] = [];
+/** 平铺列表 → 树（组织架构页与部门选择器共用） */
+export function buildTree<T extends TreeNodeLike>(
+  nodes: T[],
+  options: BuildTreeOptions<T> = {},
+): TreeNode<T>[] {
+  const map = new Map<number, TreeNode<T>>();
+  const roots: TreeNode<T>[] = [];
+
   for (const node of nodes) {
-    map.set(node.id, { ...node, children: [] } as T & { children: T[] });
+    map.set(node.id, { ...node, children: [] });
   }
+
   for (const node of nodes) {
-    const current = map.get(node.id)!;
+    const current = map.get(node.id);
+    if (!current) continue;
     const parent = node.parentId != null ? map.get(node.parentId) : undefined;
-    if (parent) {
-      (parent as unknown as Record<string, unknown>)[childrenKey];
-      parent.children.push(current);
-    } else {
-      roots.push(current);
-    }
+    if (parent) parent.children.push(current);
+    else roots.push(current);
   }
+
   if (options.sort) {
-    const sortRec = (list: (T & { children: T[] })[]): void => {
-      list.sort(options.sort!);
-      list.forEach((n) => sortRec(n.children));
+    const comparator = options.sort;
+    const sortRec = (list: TreeNode<T>[]): void => {
+      list.sort(comparator);
+      for (const item of list) sortRec(item.children);
     };
     sortRec(roots);
   }
-  return roots;
-}
 
-/** 从 path 直接构造树（不依赖 parentId，避免脏数据形成环） */
-export function treeFromPaths<T extends TreeNodeLike & { name: string }>(nodes: T[]): (T & { children: T[] })[] {
-  return buildTree(nodes);
+  return roots;
 }

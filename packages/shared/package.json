@@ -20,6 +20,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@oa/tsconfig": "workspace:*",
     "vitest": "^2.1.2"
   }
 }

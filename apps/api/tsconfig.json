@@ -1,0 +1,13 @@
+{
+  "extends": "@oa/tsconfig/node.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "dist",
+    "baseUrl": ".",
+    "types": ["node", "jest"],
+    "strictPropertyInitialization": false,
+    "noUncheckedIndexedAccess": false
+  },
+  "include": ["src/**/*.ts", "prisma/**/*.ts", "test/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}
