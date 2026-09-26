@@ -171,3 +171,37 @@ describe('上报规则引擎 · 越级开关（C13）', () => {
     expect(r.matched).toHaveLength(1);
   });
 });
+
+describe('上报规则引擎 · 触发源适用性', () => {
+  it('不在适用白名单里的触发源不参与判定（避免无条件规则被误判命中）', () => {
+    const r = evaluateEscalationRules(
+      [
+        baseRule({ id: 1, triggerType: 'OVER_LIMIT', condition: { gt: ['formData.amount', 50000] } }),
+        // 这两条在种子里没有条件：若不按场景过滤，每次结论都会误判上报
+        baseRule({ id: 2, triggerType: 'QUORUM_NOT_MET', condition: null }),
+        baseRule({ id: 3, triggerType: 'TASK_OVERDUE', condition: null }),
+      ],
+      { formData: { amount: 12000 } },
+      { applicableTriggers: ['OVER_LIMIT', 'TIE'] },
+    );
+
+    expect(r.matched).toHaveLength(0);
+    expect(r.hits.map((hit) => hit.matched)).toEqual([false, false, false]);
+    expect(r.hits[1]!.reason).toContain('当前场景不适用触发源');
+    expect(r.hits[2]!.reason).toContain('任务逾期');
+  });
+
+  it('适用白名单里的触发源照常求值', () => {
+    const r = evaluateEscalationRules(
+      [baseRule({ id: 1, triggerType: 'OVER_LIMIT', condition: { gt: ['formData.amount', 50000] } })],
+      { formData: { amount: 80000 } },
+      { applicableTriggers: ['OVER_LIMIT'] },
+    );
+    expect(r.matched.map((hit) => hit.ruleId)).toEqual([1]);
+  });
+
+  it('不传适用白名单时不做场景过滤（预测试算用）', () => {
+    const r = evaluateEscalationRules([baseRule({ id: 2, triggerType: 'QUORUM_NOT_MET' })], {});
+    expect(r.matched).toHaveLength(1);
+  });
+});

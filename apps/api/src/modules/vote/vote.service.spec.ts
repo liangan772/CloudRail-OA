@@ -324,6 +324,12 @@ describe('投票闭环 · 上报规则接线', () => {
     const result = await service.castVote(voter(4), 501, { decision: 'APPROVE' });
 
     expect(lastRules!.checkForNode).toHaveBeenCalledTimes(1);
+    // 场景白名单：只把"看数据条件"的触发源交出去，
+    // 无条件的 QUORUM_NOT_MET / TASK_OVERDUE 不能在这一刻参与判定
+    const checkArgs = lastRules!.checkForNode.mock.calls[0]![1] as { triggers: string[] };
+    expect(checkArgs.triggers).toEqual(expect.arrayContaining(['OVER_LIMIT', 'MANUAL']));
+    expect(checkArgs.triggers).not.toContain('QUORUM_NOT_MET');
+    expect(checkArgs.triggers).not.toContain('TASK_OVERDUE');
     expect(result.appliedEvents).toEqual(['ESCALATE']);
     expect(result.nodeStatus).toBe('ESCALATED');
     expect(result.reason).toContain('命中上报规则');

@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import {
   describeVoteRule,
   round4,
+  type EscalationTrigger,
   type TallyInput,
   type VoterSnapshot,
 } from '@oa/shared';
@@ -351,6 +352,20 @@ export class VoteService {
     let escalationResult: EscalationEvaluationResult | null = null;
 
     if (wouldEnterConclusion) {
+      /**
+       * 只有"看数据条件"的触发源在出结论这一刻适用。
+       * `QUORUM_NOT_MET` / `TASK_OVERDUE` / `TIMEOUT` / 结论超时这类由各自场景或定时任务触发，
+       * 放到这里会因为没有条件而每次结论都误判上报。
+       */
+      const applicableTriggers: EscalationTrigger[] = [
+        'OVER_LIMIT',
+        'CROSS_DEPT_DISPUTE',
+        'INSUFFICIENT_PERMISSION',
+        'MANUAL',
+        'REPEATED_REJECT',
+      ];
+      if (tally.tieDetected) applicableTriggers.push('TIE');
+
       escalationResult = await this.rules.checkForNode(tx, {
         tenantId: ctx.instance.tenantId,
         nodeId: ctx.node.nodeId,
@@ -364,6 +379,7 @@ export class VoteService {
         },
         formData: ctx.instance.formData,
         actor: { userId: user.userId },
+        triggers: applicableTriggers,
         voteResult: {
           approve: tally.counts.approve,
           reject: tally.counts.reject,

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import type { RuleNode } from '@oa/shared';
+import type { EscalationTrigger, RuleNode } from '@oa/shared';
 import { PrismaService } from '../../infra/prisma/prisma.service';
 import {
   evaluateEscalationRules,
@@ -30,6 +30,8 @@ export interface EscalationCheckInput {
     tie: boolean;
   };
   dept?: { id: number | null; workNo: string | null; level: number | null; path: string | null };
+  /** 当前场景适用的触发源白名单（不传则不做场景过滤） */
+  triggers?: EscalationTrigger[];
 }
 
 /**
@@ -79,7 +81,7 @@ export class RuleEngineService {
         user: { userId: input.actor.userId },
         dept: input.dept ?? {},
       },
-      { allowCrossLevel },
+      { allowCrossLevel, applicableTriggers: input.triggers },
     );
 
     return { ...result, ruleCount: specs.length, allowCrossLevel };

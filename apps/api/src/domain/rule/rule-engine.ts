@@ -80,6 +80,16 @@ export interface EscalationEvaluationOptions {
    * 关闭时，`SPECIFIC_DEPT` / `SKIP_TO_LEVEL` 这类目标规则一律视为不命中。
    */
   allowCrossLevel?: boolean;
+  /**
+   * 当前场景**适用**的触发源白名单。
+   *
+   * 必要性：像 `QUORUM_NOT_MET` / `TASK_OVERDUE` 这类规则在配置里往往不写条件
+   * （触发源本身就是触发器），而"没条件 = 命中"是引擎的既定语义。
+   * 如果在"本层即将出结论"的时刻把所有规则都算一遍，这两条就会把每次正常结论
+   * 都误判成上报。所以要由调用方回答"我现在处于哪种场景，哪些触发源才适用"。
+   * 不传时不做限制（预测试算等场景）。
+   */
+  applicableTriggers?: EscalationTrigger[];
 }
 
 /** 需要租户开关才能生效的目标部门规则（C13：不允许越级） */
@@ -157,6 +167,19 @@ export function evaluateEscalationRules(
       acceptMode: rule.acceptMode,
       onMissingWorkNo: rule.onMissingWorkNo,
     };
+
+    if (options.applicableTriggers && !options.applicableTriggers.includes(rule.triggerType)) {
+      hits.push({
+        ruleId: rule.id,
+        triggerType: rule.triggerType,
+        triggerLabel,
+        matched: false,
+        reason: `当前场景不适用触发源「${triggerLabel}」，本次不参与判定`,
+        condition: rule.condition,
+        target,
+      });
+      continue;
+    }
 
     // 越级上报默认禁用：即使条件命中也不允许，避免"配置漏开关就绕过逐级上溯"
     if (options.allowCrossLevel === false && CROSS_LEVEL_TARGETS.includes(rule.targetDeptRule)) {
