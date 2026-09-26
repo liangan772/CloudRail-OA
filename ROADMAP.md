@@ -29,7 +29,7 @@
 | 阶段 | 名称 | 主要交付物 | 状态 |
 | --- | --- | --- | --- |
 | 0 | 需求澄清、信息架构、技术选型、数据模型草案 | `ROADMAP.md`、`docs/stage-0/*`（含 Q1–Q27 冻结基线） | ✅ 已完成，等待「进入阶段 1」指令 |
-| 1 | Prisma Schema、共享类型与枚举、种子数据 | `apps/api/prisma/schema.prisma`（44 模型/41 枚举/75 索引，validate 通过）、`packages/shared`（枚举+常量+DSL）、幂等 seed、脚手架 | 🟢 已完成（`prisma validate` ✓ / `prisma generate` ✓ / DDL 生成 ✓ / `pnpm -w typecheck` 3 包全绿 ✓）；仅剩 `migrate + seed` 待 PostgreSQL 可达 |
+| 1 | Prisma Schema、共享类型与枚举、种子数据 | `apps/api/prisma/schema.prisma`（44 模型/41 枚举/75 索引）、`packages/shared`（枚举+常量+DSL）、幂等 seed、脚手架、`prisma/migrations/*` | ✅ 已完成：`validate`/`generate`/typecheck 全绿；**migrate + seed 已对宝塔 PostgreSQL 16.3 实跑通过**（init 迁移 + 部分索引迁移；种子 1 租户/3 部门/8 工号成员/9 用户/5 角色/36 权限/2 模板/3 序列） |
 | 2 | 后端核心：Auth、Org、Workflow、VoteEngine、NodeStateMachine、RuleEngine、**投票结论（VoteConclusion）** | 可运行的 API + 单测（计票/全员表态/结论/状态机/规则求值） | 🚧 进行中：VoteEngine ✅（26 测试）、NodeStateMachine ✅（§6.1/§6.2 全表 + 守卫）、VoteConclusion 策略 ✅（39 测试，共 65 全绿）；待做 Auth / Org / Workflow 服务与 Controller、RuleEngine 接线、权限守卫（数据范围） |
 | 3 | 后端扩展：TaskEngine、EscalationEngine（逐级 + 上级投票复用同一 `VoteEngine`）、BullMQ、WebSocket、审计、Outbox | 队列消费者 + 网关 + 审计与发件箱 | ⏸ 未开始 |
 | 4 | 前端基础：布局、主题、路由、API Client、状态管理、通用组件 | 设计系统 + 应用骨架 + 可登录 | ⏸ 未开始 |
