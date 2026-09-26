@@ -1,0 +1,37 @@
+# 开发环境只起依赖（C8）：postgres + redis。应用本身在宿主机上跑 pnpm dev，热更新最快。
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: oa-postgres-dev
+    environment:
+      POSTGRES_USER: oa
+      POSTGRES_PASSWORD: oa_dev_password
+      POSTGRES_DB: oa
+      TZ: Asia/Shanghai
+    ports:
+      - '127.0.0.1:5432:5432'
+    volumes:
+      - oa-pgdata-dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U oa -d oa']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: oa-redis-dev
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '127.0.0.1:6379:6379'
+    volumes:
+      - oa-redis-dev:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  oa-pgdata-dev:
+  oa-redis-dev:

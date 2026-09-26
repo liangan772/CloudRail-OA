@@ -1,0 +1,22 @@
+# 可选 HTTPS 反代：/api 与 /ws 走 API，其余走 Web。
+# 只有启用 tls profile 时才会被加载。
+{
+	email {$ACME_EMAIL}
+}
+
+{$OA_DOMAIN} {
+	encode zstd gzip
+
+	# Socket.IO 需要 upgrade 头，单独处理
+	handle /ws/* {
+		reverse_proxy api:3001
+	}
+
+	handle /api/* {
+		reverse_proxy api:3001
+	}
+
+	handle {
+		reverse_proxy web:3000
+	}
+}

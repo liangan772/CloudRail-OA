@@ -1,0 +1,103 @@
+# 生产：一台机器 + 一个 compose（C8）。不引入 Nginx/K8s/Prometheus。
+# HTTPS 用可选 profile（caddy）；不用 Caddy 时上层有现成反代也可以。
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-oa}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在 .env 里设置 POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-oa}
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      - oa-pgdata:/var/lib/postgresql/data
+      - ./backups:/backups
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-oa} -d ${POSTGRES_DB:-oa}']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    command: ['redis-server', '--appendonly', 'yes']
+    volumes:
+      - oa-redis:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      TZ: ${TZ:-Asia/Shanghai}
+      API_PORT: 3001
+      DATABASE_URL: postgresql://${POSTGRES_USER:-oa}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-oa}?schema=public
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?请设置 JWT_ACCESS_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?请设置 JWT_REFRESH_SECRET}
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-15m}
+      JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-7d}
+      DEFAULT_TENANT_CODE: ${DEFAULT_TENANT_CODE:-demo}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      WECOM_WEBHOOK: ${WECOM_WEBHOOK:-}
+      DINGTALK_WEBHOOK: ${DINGTALK_WEBHOOK:-}
+      FEISHU_WEBHOOK: ${FEISHU_WEBHOOK:-}
+    ports:
+      - '${API_BIND:-127.0.0.1}:3001:3001'
+    volumes:
+      - oa-uploads:/app/data/uploads
+
+  web:
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+    restart: always
+    depends_on:
+      - api
+    environment:
+      NODE_ENV: production
+      TZ: ${TZ:-Asia/Shanghai}
+      # 服务端 rewrite 目标：容器内直接用服务名
+      NEXT_PUBLIC_API_BASE_URL: http://api:3001
+    ports:
+      - '${WEB_BIND:-127.0.0.1}:3000:3000'
+
+  # 可选：需要自动 HTTPS 时启用 profile
+  # docker compose -f docker/docker-compose.prod.yml --profile tls up -d
+  caddy:
+    image: caddy:2-alpine
+    profiles: ['tls']
+    restart: always
+    depends_on:
+      - web
+      - api
+    ports:
+      - '80:80'
+      - '443:443'
+    environment:
+      OA_DOMAIN: ${OA_DOMAIN:?启用 tls profile 需要设置 OA_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - oa-caddy-data:/data
+      - oa-caddy-config:/config
+
+volumes:
+  oa-pgdata:
+  oa-redis:
+  oa-uploads:
+  oa-caddy-data:
+  oa-caddy-config:
