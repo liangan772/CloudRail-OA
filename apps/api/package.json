@@ -13,14 +13,14 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
-    "db:seed": "prisma db seed",
+    "db:seed": "tsx prisma/seed/index.ts",
     "db:reset": "prisma migrate reset --force",
     "db:validate": "prisma validate",
     "db:sql": "prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script",
     "db:cleanup": "tsx prisma/cleanup-flow-data.ts"
   },
   "prisma": {
-    "seed": "tsx prisma/seed/index.ts"
+    "seed": "node_modules/.bin/tsx prisma/seed/index.ts"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.4",
