@@ -121,6 +121,7 @@ CREATE TABLE IF NOT EXISTS audit_logs_<YYYY_MM> PARTITION OF audit_logs
 
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
+| `P1000 Authentication failed ... for "xxx"` | **改过 `POSTGRES_USER/PASSWORD/DB`**：PostgreSQL 镜像只在数据目录为空时按这些变量初始化一次，之后改 `.env` 不会新增用户/改密码，只会让 api 拿着新凭据连旧库 | 要么把 `.env` 改回与数据卷一致（`exec postgres psql -U <旧用户> -d <旧库> -c '\du'` 可查）；要么删卷重建（`down` → `docker volume rm <项目名>_oa-pgdata` → `up -d`，**会清空数据**）。想保留数据只换口令：进容器 `ALTER USER ... PASSWORD '...'` |
 | `P1001 Can't reach database server` | 网络/端口不通 | 确认 PG 在跑、端口与防火墙；容器内用服务名 `postgres` |
 | `P1017 Server has closed the connection` | 连接被中途重置（代理/VPN/中间设备） | 换直连或 SSH 隧道；本机开发常见于代理软件 |
 | `Transaction already closed` | 事务超时 | 项目已用 `runInTransaction`（30s）；若仍出现说明单事务语句过多，需要拆分 |
