@@ -24,6 +24,8 @@
 | 可见范围 | `VoteViewScope` | 投票明细的可见边界：默认仅本部门，上报链上的上级部门可见全部 |
 | 表态 | `stated` | 投票人已提交明确选择（同意/反对）；未表态不算投票，且**不允许弃权** |
 | 部门工号 | `Department.workNo` | 部门级统一处理入口：上报**统一投递到上级部门的工号**；工号成员即该级的投票人（不是裁定人） |
+| 投票池 | `votingPool` | 真正参与计票的人：`N_pool = N_expected − 缺席人数`。全员表态、分母、权重总和都按池内计算 |
+| 缺席 | `ABSENT` | 请假/出差等无法表态且无委托的人：**不算票、不计入投票池**，既不触发催办也不算未表态 |
 | 有效票 | `denominator` | 参与通过率计算的分母，取决于 `abstainPolicy` |
 | 否决优先 | veto-priority | 判定顺序：否决规则命中即驳回，不再看通过规则 |
 
@@ -93,7 +95,7 @@ Tenant ─┬─ User ─┬─ UserDepartment ── Department(自引用 paren
 | `WorkflowNode` | `id, versionId, type, name, order, config(JSONB), *layerIndex, *nodeKey` | `(versionId, order)` 索引；唯一 `(versionId, nodeKey)` |
 | `WorkflowEdge` | `id, versionId, fromNodeId, toNodeId, condition(JSONB), *priority, *label` | `(versionId, fromNodeId)` 索引 |
 | `NodeVoterRule` | `id, nodeId, voterType, voterValue(JSONB), weight, *isRequired, *order` | `(nodeId)` 索引；voterValue 结构见 §7 |
-| `NodeVoteRule` | `id, nodeId, passRule, passThreshold, rejectRule, rejectThreshold, abstainPolicy, timeoutPolicy, visibility, *viewScope(默认 DEPT_ONLY), *timeoutHours, *allowAbstain(默认 false), *requireAllVote(默认 true), *revotePolicy(默认 UNLIMITED_BEFORE_CONCLUSION), *vetoTerminates(默认 false), *tiePolicy, *conclusionMode(默认 MANUAL_CONFIRM), *conclusionAuthorRule(JSONB), *remindIntervalHours, *maxRemindRounds, *quorum` | `nodeId` 唯一（1:1） |
+| `NodeVoteRule` | `id, nodeId, passRule, passThreshold, rejectRule, rejectThreshold, abstainPolicy, timeoutPolicy, visibility, *viewScope(默认 DEPT_ONLY), *timeoutHours, *allowAbstain(恒 false), *requireAllVote(默认 true), *revotePolicy(默认 UNLIMITED_BEFORE_CONCLUSION), *vetoTerminates(默认 false), *tiePolicy(默认 ESCALATE), *conclusionMode(默认 MANUAL_CONFIRM), *conclusionAuthorRule(JSONB), *remindIntervalHours, *maxRemindRounds, *quorumPolicy(默认 MIN_POOL_RATIO), *minQuorum(默认 0.6), *allowMarkAbsent(默认 true)` | `nodeId` 唯一（1:1） |
 | `NodeTaskTemplate` | `id, nodeId, title, assigneeRule(JSONB), priority, dueOffset, checklist(JSONB), *acceptanceRule(JSONB), *triggerOn(PASS/ALWAYS)` | `(nodeId, order)` 索引 |
 | `NodeEscalationRule` | `id, nodeId, triggerType, condition(JSONB), targetDeptRule(JSONB), timeout, autoApprove, *freezeSource, *maxLevel, *skipLevels` | `(nodeId, triggerType)` 索引 |
 
@@ -103,7 +105,7 @@ Tenant ─┬─ User ─┬─ UserDepartment ── Department(自引用 paren
 | --- | --- | --- |
 | `WorkflowInstance` | `id, tenantId, templateVersionId, initiatorId, title, formData(JSONB), status, currentNodeId, startedAt, endedAt, *code, *layerIndex, *suspendedFrom, *priority, *summary` | **组合索引 `(tenantId, status, startedAt)`**；唯一 `(tenantId, code)` |
 | `InstanceNode` | `id, instanceId, nodeId, type, status, startedAt, endedAt, deadline, result(JSONB), *layerIndex, *round, *escalationId, *conclusionStatus, *conclusionDeadline` | 唯一 `(instanceId, nodeId, round)`；**`(tenantId, status, deadline)`**（超时扫描核心索引） |
-| `InstanceNodeVoter` | `id, instanceNodeId, userId, weight, status, votedAt, *sourceRuleId, *sourceReason, *delegateFromUserId, *remindedAt, *remindCount` | **唯一 `(instanceNodeId, userId)`**；`(instanceNodeId, status)` 索引 |
+| `InstanceNodeVoter` | `id, instanceNodeId, userId, weight, status, votedAt, *sourceRuleId, *sourceReason, *delegateFromUserId, *remindedAt, *remindCount, *absentAt, *absentById, *absentReason, *absentSource, *excludedWeight` | **唯一 `(instanceNodeId, userId)`**；`(instanceNodeId, status)` 索引。`status=ABSENT` 时该行被排除出投票池，`excludedWeight` 记录被剔除的权重以便审计与复算 |
 | `Vote` | `id, instanceNodeId, voterId, decision, comment, weight, createdAt, *revoteSeq, *isReplaced, *replacedById, *delegateFromUserId, *ip, *ua` | 唯一 `(instanceNodeId, voterId, revoteSeq)`；`(instanceNodeId, isReplaced)` 索引。**只 INSERT，不 UPDATE/DELETE**（改票 = 新行 + 旧行 `isReplaced=true`） |
 | `VoteResult` | `id, instanceNodeId, approveCount, rejectCount, abstainCount, weightedScore, passed, snapshot(JSONB), *ruleSnapshot(JSONB), *denominator, *tieResolvedBy, *decidedBy, *decidedAt` | `instanceNodeId` 唯一 |
 | `VoteConclusion` | `id, tenantId, instanceNodeId, authorId, decision(APPROVE/REJECT), systemDecision, isOverride, content, attachments(JSONB), createdAt, *overrideReason, *round` | 唯一 `(instanceNodeId, round)`；`(authorId, createdAt)` 索引。**提交后不可修改**（如需重填走新一轮 `round`） |
@@ -158,6 +160,7 @@ Tenant ─┬─ User ─┬─ UserDepartment ── Department(自引用 paren
 | `NumberSequence` | 实例号/任务号/上报号需按租户按年月递增且不重复 | `id, tenantId, type, period, nextValue` + 唯一 `(tenantId, type, period)` |
 | `IdempotencyKey` | 队列消费与客户端重试去重 | `id, tenantId, scope, key, responseHash, createdAt` + 唯一 `(tenantId, scope, key)` |
 | `WebhookSubscription` | 对外通知/集成（企微/钉钉/飞书/自定义） | `id, tenantId, eventTypes, url, secret, enabled, failureCount` |
+| `Absence` | 提前登记的请假/出差区间，节点开启时自动把命中区间的人标为 `ABSENT`（避免每次人工标记） | `id, tenantId, userId, startAt, endAt, reason, source(MANUAL/LEAVE_SYNC), createdBy` + `(tenantId, userId, startAt, endAt)` 索引 |
 
 ## 5. 枚举清单（`packages/shared/src/enums`）
 
@@ -180,7 +183,9 @@ Tenant ─┬─ User ─┬─ UserDepartment ── Department(自引用 paren
 | 投票 | `ConclusionDecision` | `APPROVE, REJECT` |
 | 投票 | `ConclusionStatus` | `NOT_REQUIRED, PENDING, SUBMITTED, TIMEOUT` |
 | 投票 | `TiePolicy` | `ESCALATE`（**已确认：报上级组织裁定**）、`REJECT`、`CHAIRMAN_VOTE` |
-| 投票 | `VoterStatus` | `PENDING, VOTED, TIMEOUT, DELEGATED, SKIPPED` |
+| 投票 | `VoterStatus` | `PENDING, VOTED, TIMEOUT, DELEGATED, SKIPPED, ABSENT`（缺席者被排除出投票池） |
+| 投票 | `AbsenceSource` | `MANUAL`（人工标记）、`LEAVE_SYNC`（请假数据自动命中）、`DECLARED`（本人声明） |
+| 投票 | `QuorumPolicy` | `NONE`、`MIN_POOL_RATIO`（**默认：池内人数 ≥ 应投票人数 × `minQuorum`，默认 0.6**）、`MIN_POOL_N` |
 | 通用 | `DeadlineMode` | `CALENDAR_DAY`（**已确认：自然日**）、`WORKING_DAY`（保留，需节假日数据） |
 | 组织 | `WorkNoMissingPolicy` | `ESCALATE_UP`（默认）、`NOTIFY_ADMIN`、`BLOCK` |
 | 上报 | `EscalationAcceptMode` | `AUTO`（**默认：投递即开投，无需签收**）、`GRAB`（任一工号成员签收后开投）、`ASSIGNED` |
@@ -257,6 +262,8 @@ PENDING_CONCLUSION ──结论填写超时──▶ ESCALATED（交上级裁定
 | VOTING | `VOTE_CAST` | 投票人在快照名单内；本轮结论未形成（`revotePolicy=UNLIMITED_BEFORE_CONCLUSION` 允许反复改票）；未过截止 | VOTING | 新增一行 `Vote` + 旧票标记 `isReplaced=true`；重算进度；WS `vote.cast` |
 | VOTING | `VETO_LOCK` | `rejectRule` 命中且 `vetoTerminates=false`（默认） | VOTING（标记否决锁定） | 记录 `vetoLocked`；**仍等待全员表态**；通知结论填写人 |
 | VOTING | `ALL_STATED` | `requireAllVote=true` 时全员已表态（`VOTED` / `DELEGATED`） | PENDING_CONCLUSION | 计票产出**系统拟判定**（否决锁定则拟驳回）；写 `VoteResult`（`isProvisional=true`）；`conclusionStatus=PENDING`；通知结论填写人；投递结论超时任务；WS `conclusion.pending` |
+| VOTING | `MARK_ABSENT` | 操作人具 `VOTE_MARK_ABSENT`；理由必填；本层结论尚未形成；被标记人无有效委托 | VOTING（池缩小） | `status=ABSENT`；重算 `N_pool / Wtotal / D`；**若池内人数低于 `minQuorum` → 立即转 ESCALATED**；若因此满足 `ALL_STATED` → 直接进入结论阶段；写审计 |
+| VOTING | `REVOKE_ABSENT` | 结论尚未形成；有权限 | VOTING（池恢复） | 恢复为 `PENDING`；重算池；写审计（保留撤销痕迹） |
 | VOTING | `DEADLINE_HIT` | 存在未表态人 | TIMEOUT | 停止计时；记录未表态名单；通知 |
 | TIMEOUT | `APPLY_POLICY(REMIND_ONLY)` | `remindCount < maxRemindRounds`（默认 3） | VOTING | 重设 deadline（+`remindIntervalHours`，默认 8h）；`remindCount++`；再次催办 |
 | TIMEOUT | `APPLY_POLICY(REMIND_ONLY 超轮次)` | `remindCount >= maxRemindRounds` | ESCALATED | **强制上报**，避免节点永久悬挂 |
@@ -362,7 +369,8 @@ ADOPTED / RETURNED ──意见回写原流程──▶ CLOSED
 | 约束 | 定义 | 违反后果 |
 | --- | --- | --- |
 | **必须表态** | 每个 `InstanceNodeVoter` 必须提交 `APPROVE` 或 `REJECT`（`allowAbstain=false` 时不允许 `ABSTAIN`），才算「已表态」；委托投票（`Delegation`）由受托人代为表态，计入本人 | 调用投票接口返回 `VOTE_ABSTAIN_NOT_ALLOWED`；节点无法进入结论阶段 |
-| **全员表态才出结论** | `requireAllVote=true`（默认）时，`statedCount = N` 之前**不得进入 `PENDING_CONCLUSION`**；未表态者只能通过超时策略消解（催办 → 上报 / 视为反对） | `ALL_STATED` 事件被守卫拒绝 |
+| **全员表态才出结论** | `requireAllVote=true`（默认）时，**池内**全部表态（`statedCount = N_pool`）之前不得进入 `PENDING_CONCLUSION`；池外（缺席）无需表态；池内的未表态者只能通过超时策略消解（催办 → 上报 / 视为反对） | `ALL_STATED` 事件被守卫拒绝 |
+| **缺席不算票、不计入池** | 请假/出差且无委托者标为 `ABSENT`：从分母 `D`、权重总和 `Wtotal`、应表态数中**一并剔除**；既不催办也不算未表态。有委托时受托人投票，仍计入池内 | 池内人数低于 `minQuorum`（默认 60%）→ 该层不得通过，直接转上报（防用缺席稀释门槛） |
 | **结论必须人工填写** | `conclusionMode=MANUAL_CONFIRM`（默认）时，系统计票结果只是**拟判定**，必须有 `VoteConclusion` 才能推进流程 | 节点停留在 `PENDING_CONCLUSION`，超时则上报 |
 
 **否决锁定**：`rejectRule` 命中时（`vetoTerminates=false`，默认）不是立刻终结投票，而是把本层锁定为「不予通过」——即使后续计票满足 `passRule`，拟判定仍为驳回。这样既落实一票否决，又不剥夺其他人表态的权利（澄清项 Q20）。
@@ -371,10 +379,13 @@ ADOPTED / RETURNED ──意见回写原流程──▶ CLOSED
 
 | 符号 | 含义 |
 | --- | --- |
-| `N` | 该层应投票人数 = `InstanceNodeVoter` 条数 |
+| `N_expected` | 该层应投票人数 = `InstanceNodeVoter` 条数 |
+| `N_pool` | **投票池人数** = `N_expected − 缺席人数`；全员表态与最低法定人数都按它判断 |
+| `Wtotal` | 池内权重总和（缺席者权重已剔除） |
 | `A / R / B` | 同意 / 反对 / 弃权 的**票数**（只计最新票，`isReplaced=false`） |
 | `Wa / Wr` | 同意 / 反对票的**权重和** |
-| `Wtotal` | 该层全部投票人权重和 |
+| `absentCount` | 缺席人数（`status=ABSENT`），与被剔除的权重 |
+| `minQuorum` | 最低法定人数比例（默认 0.6）：`N_pool / N_expected >= minQuorum` 才允许本层通过 |
 | `D` | 有效票分母 `denominator` |
 | `A' / R'` | 按弃权策略折算后的同意 / 反对有效数 |
 | `stated` | 已表态人数（`InstanceNodeVoter.status ∈ {VOTED, DELEGATED}`） |
@@ -396,8 +407,8 @@ ADOPTED / RETURNED ──意见回写原流程──▶ CLOSED
 
 | 规则 | 判定条件 | 备注 |
 | --- | --- | --- |
-| `PASS/ALL` | `R' = 0` 且 `A' = N` | 弃权是否阻断取决于 `abstainPolicy`（澄清项 Q4） |
-| `PASS/MAJORITY` | `A' > D / 2` | 平票触发 `tiePolicy` |
+| `PASS/ALL` | `R' = 0` 且 `A' = N_pool` | 全按**池内**人数判定；缺席者不影响（Q4/Q8 已确认） |
+| `PASS/MAJORITY` | `A' > D / 2`，且 `N_pool / N_expected >= minQuorum` | 平票按 `tiePolicy=ESCALATE` 报上级组织裁定（Q3 已确认） |
 | `PASS/RATIO` | `A' / D >= passThreshold` | `passThreshold ∈ (0,1]`，默认 0.6 |
 | `PASS/WEIGHTED` | `Wa' / Wtotal >= passThreshold` | 权重制，支持「部门长权重 2」 |
 | `PASS/AT_LEAST_N` | `A' >= passThreshold`（整数 N） | 与总人数无关 |
@@ -409,7 +420,9 @@ ADOPTED / RETURNED ──意见回写原流程──▶ CLOSED
 
 ```
 【阶段一：投票收集（VOTING）】
-1) 校验：是否在投票期内？投票人是否在快照名单内？是否本轮结论已形成（已形成则拒绝改票）？
+0) 计算投票池：N_pool = N_expected − 缺席人数；Wtotal = 池内权重和；缺席者不催办、不计入分母
+   若 N_pool / N_expected < minQuorum（默认 0.6）→ 本层不得通过，直接转 ESCALATED（上报）
+1) 校验：是否在投票期内？投票人是否在快照名单内且未被标记缺席？是否本轮结论已形成（已形成则拒绝改票）？
    → 否：抛 VOTE_* 错误
 2) 校验表态合法性：allowAbstain=false 时拒绝 ABSTAIN → VOTE_ABSTAIN_NOT_ALLOWED
 3) 写入票（事务内 + 唯一约束兜底；改票 = 新增行 + 旧行 isReplaced=true）
@@ -417,7 +430,8 @@ ADOPTED / RETURNED ──意见回写原流程──▶ CLOSED
 5) 否决标记：rejectRule 命中 → 置 vetoLocked=true
    ├ vetoTerminates=false（默认）→ 继续等待全员表态
    └ vetoTerminates=true         → 立即进入阶段二（未表态者记 SKIPPED）
-6) 表态完成检查：requireAllVote=true 且 stated < N → 保持 VOTING，等待后续票或 deadline
+6) 表态完成检查：requireAllVote=true 且 stated < N_pool → 保持 VOTING，等待后续票或 deadline
+   （若期间有人被标记 ABSENT，池缩小到 stated == N_pool → 立即进入阶段二）
 
 【阶段二：形成系统拟判定（VOTING → PENDING_CONCLUSION）】
 7) 若 vetoLocked → systemDecision = REJECT（一票否决优先，即使 passRule 满足）
@@ -447,6 +461,7 @@ ADOPTED / RETURNED ──意见回写原流程──▶ CLOSED
   "counts": { "approve": 3, "reject": 1, "abstain": 0 },
   "stated": 4,
   "expectedVoters": 4,
+  "votingPool": 4, "absentCount": 0, "absentUserIds": [], "minQuorum": 0.6, "quorumSatisfied": true,
   "weighted": { "approve": 5, "reject": 2, "total": 9 },
   "denominator": 4,
   "allowAbstain": false,
@@ -609,5 +624,7 @@ Value     := Literal | { "$path": Path }            // 支持与另一字段比�
 | 21 | `Escalation` 增加 `fromWorkNo / toWorkNo` | 工号快照，事后调整工号不影响历史链路 | 阶段 1 字段 + `(toWorkNo, status)` 索引 |
 
 | 22 | `Escalation` 增加 `upwardInstanceNodeId / finalOpinion / writeBackAction`，上级投票**复用 `InstanceNode` + `VoteEngine`**，不新建投票体系 | 用户确认「上报 = 让上级做一次同样的投票」；复用可保证规则语义与前端组件完全一致 | 阶段 3 的核心实现；避免第二套计票逻辑 |
+| 23 | 新增 `Absence`（请假/出差区间登记） | 缺席要「不算票、不计入池」，靠人工逐节点标记容易漏；按区间登记后节点开启时自动命中 | 阶段 1 建表；节点 `OPEN` 时自动标 `ABSENT` |
+| 24 | `InstanceNodeVoter` 增加缺席字段 + `NodeVoteRule.minQuorum` / `quorumPolicy` | 缺席剔除需要留痕（谁标、为什么、剔了多少权重），并需要法定人数下限防止门槛被稀释 | 阶段 1 字段；阶段 2 计票强制校验 |
 
-以上 22 条建议默认全部采纳（第 1 条降级为可选、本版本不建表）；如需删减请指出编号，我将在阶段 1 调整 schema。
+以上 24 条建议默认全部采纳（第 1 条降级为可选、本版本不建表）；如需删减请指出编号，我将在阶段 1 调整 schema。

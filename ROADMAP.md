@@ -22,6 +22,7 @@
 | C13 | **不允许越级上报** | `EscalationEngine` 只支持「直接上级」与「逐级上溯」，跳级能力默认关闭 |
 | C14 | 每个部门设置**部门工号**，上报**统一投递到上级部门的工号**（不是投给人） | `Department.workNo` + `DepartmentWorkNoMember`；`Escalation.toWorkNo` 快照；工号成员即该级投票人 |
 | C15 | **上报 = 让上级部门再跑一次同样的投票**，结论意见回写原流程 | `Escalation.upwardInstanceNodeId` 复用 `InstanceNode` + `VoteEngine`；上级同样全员表态、人工结论；单人不裁定、不派任务 |
+| C16 | **缺席者不算票、也不计入投票池**（分母与权重同步剔除） | `InstanceNodeVoter.status=ABSENT`；`N_pool = N_expected - absent`；「全员表态」与分母都按池内计算；配 `minQuorum` 防用缺席稀释门槛 |
 
 ## 二、阶段划分与交付物
 

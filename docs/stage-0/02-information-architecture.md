@@ -93,7 +93,7 @@ app/
 | --- | --- |
 | 左：上下文 | 申请表单只读渲染、发起人与发起时间、附件列表、评论区 |
 | 中：投票区 | 同意 / 反对 两按钮 + 意见输入（反对时必填，**无弃权选项**）；已投票则显示我的选择与时间，**结论形成前可反复改票**（改票按钮 + 历史轨迹）；底部实时进度条（同意/反对分段） |
-| 右：规则与人员 | 计票规则卡片（人类可读翻译，例如「全员必须表态；≥ 60% 同意且无人反对即拟通过」）、**按部门分组的投票明细**（本部门显示姓名与选择，其他部门仅显示"已投 N/M"）、截止倒计时、催办按钮 |
+| 右：规则与人员 | 计票规则卡片（人类可读翻译，例如「池内 4 人全员表态；≥ 60% 同意且无人反对即拟通过；池内人数不得低于应投票人数的 60%」）、**按部门分组的投票明细**（本部门显示姓名与选择，其他部门仅显示"已投 N/M"，缺席者标灰并注明"缺席不计票"）、截止倒计时、催办按钮、标记缺席入口（需 `VOTE_MARK_ABSENT`） |
 | 下：结论区 | 全员表态后出现：系统自动判定结果（拟通过/拟驳回）+ 计票明细、结论填写表单（结论类型 + 结论意见必填 + 附件）、改判时强制填写理由、提交后展示结论卡片（填写人/时间/是否改判） |
 
 ### 3.3 上报详情页（上报链可视化）
@@ -159,7 +159,7 @@ app/
 
 | 概念 | 说明 |
 | --- | --- |
-| 权限点 | `模块_动作` 形式，如 `VOTE_CAST`、`VOTE_VIEW_DEPT`、`VOTE_VIEW_ALL`（仅上报链上级部门）、`NODE_CONCLUDE`（填写投票结论）、`TASK_ASSIGN`、`ESC_HANDLE`（工号受理）、`ESC_UPGRADE`、`ESC_CROSS_LEVEL`（默认关闭，越级已禁止）、`DEPT_WORKNO_MANAGE`、`WF_PUBLISH`、`AUDIT_EXPORT`、`ORG_MANAGE`、`ROLE_MANAGE`、`STATS_READ` |
+| 权限点 | `模块_动作` 形式，如 `VOTE_CAST`、`VOTE_VIEW_DEPT`、`VOTE_VIEW_ALL`（仅上报链上级部门）、`VOTE_MARK_ABSENT`（标记缺席，需理由）、`NODE_CONCLUDE`（填写投票结论）、`TASK_ASSIGN`、`ESC_HANDLE`、`ESC_UPGRADE`、`ESC_CROSS_LEVEL`（默认关闭，越级已禁止）、`DEPT_WORKNO_MANAGE`、`WF_PUBLISH`、`AUDIT_EXPORT`、`ORG_MANAGE`、`ROLE_MANAGE`、`STATS_READ` |
 | 数据范围 | `SELF` / `DEPT` / `DEPT_AND_SUB` / `DEPT_LIST`（指定部门）/ `TENANT`（全租户），挂在 `UserRole.scopeType + scopeId` |
 | 前端用法 | `usePermissions()` 返回 `{ can(code), scope, deptIds }`；路由守卫 + 按钮级 `can()`；**前端隐藏只是体验，真实拒绝在后端守卫** |
 | 后端用法 | `JwtAuthGuard`（身份）→ `PermissionGuard`（权限点）→ `DataScopeGuard`（把范围注入 `RequestContext`）→ Repository 统一拼 `tenantId + scope` 条件 |
