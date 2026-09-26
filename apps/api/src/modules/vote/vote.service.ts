@@ -268,6 +268,72 @@ export class VoteService {
 
   /* ------------------------------ 进度查询 ------------------------------ */
 
+  // 待我表态 / 待我填结论的流程列表（投票中心的数据源）。
+  // 直接按"我是当前层的投票人且状态为 PENDING"筛，避免前端逐条查进度造成 N+1。
+  async listMyPending(user: AuthenticatedUser, page: number, pageSize: number) {
+    const where: Prisma.InstanceNodeWhereInput = {
+      tenantId: user.tenantId,
+      status: { in: ['VOTING', 'PENDING_CONCLUSION'] },
+      voters: { some: { userId: user.userId, status: { in: ['PENDING', 'VOTED'] } } },
+    };
+
+    const [rows, total] = await this.prisma.$transaction([
+      this.prisma.instanceNode.findMany({
+        where,
+        orderBy: [{ deadline: 'asc' }, { id: 'asc' }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        select: {
+          id: true,
+          instanceId: true,
+          status: true,
+          layerIndex: true,
+          deadline: true,
+          conclusionStatus: true,
+          instance: { select: { code: true, title: true, status: true, initiatorId: true } },
+          voters: {
+            where: { userId: user.userId },
+            select: { status: true, votedAt: true },
+          },
+          _count: { select: { voters: true } },
+        },
+      }),
+      this.prisma.instanceNode.count({ where }),
+    ]);
+
+    const decisions = await this.prisma.vote.findMany({
+      where: {
+        isReplaced: false,
+        voterId: user.userId,
+        instanceNodeId: { in: rows.map((row) => row.id) },
+      },
+      select: { instanceNodeId: true, decision: true },
+    });
+    const decisionByNode = new Map(decisions.map((item) => [item.instanceNodeId, item.decision]));
+
+    return {
+      items: rows.map((row) => ({
+        nodeId: row.id,
+        instanceId: row.instanceId,
+        instanceCode: row.instance.code,
+        title: row.instance.title,
+        instanceStatus: row.instance.status,
+        nodeStatus: row.status,
+        layerIndex: row.layerIndex,
+        deadline: row.deadline,
+        conclusionStatus: row.conclusionStatus,
+        myStatus: row.voters[0]?.status ?? 'PENDING',
+        myDecision: decisionByNode.get(row.id) ?? null,
+        // 是否需要我填结论：节点已全员表态且结论未提交
+        needConclusion: row.status === 'PENDING_CONCLUSION' && row.conclusionStatus === 'PENDING',
+        voterCount: row._count.voters,
+      })),
+      total,
+      page,
+      pageSize,
+    };
+  }
+
   async getProgress(user: AuthenticatedUser, instanceId: number) {
     const ctx = await this.contexts.loadStandalone(user.tenantId, instanceId);
     const decisionByVoter = new Map(ctx.votes.map((vote) => [vote.voterId, vote.decision]));

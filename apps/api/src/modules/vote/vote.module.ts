@@ -4,13 +4,14 @@ import { RuleEngineModule } from '../rule/rule-engine.module';
 import { ConclusionService } from './conclusion.service';
 import { NodeContextModule } from './node-context.module';
 import { VoteController } from './vote.controller';
+import { MyVotesController } from './my-votes.controller';
 import { VoteService } from './vote.service';
 import { EscalationModule } from '../escalation/escalation.module';
 import { TaskModule } from '../task/task.module';
 
 @Module({
   imports: [InstanceModule, RuleEngineModule, NodeContextModule, EscalationModule, TaskModule],
-  controllers: [VoteController],
+  controllers: [VoteController, MyVotesController],
   providers: [VoteService, ConclusionService],
   exports: [VoteService, ConclusionService],
 })

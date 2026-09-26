@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useState, type ReactNode } from 'react';
 import {
   Bell,
+  ChartColumn,
   CheckSquare,
   FileStack,
   GitBranch,
@@ -44,6 +45,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
       { href: '/instances', label: '流程实例', icon: FileStack, permissions: ['INSTANCE_READ'] },
       { href: '/templates', label: '流程模板', icon: GitBranch, permissions: ['WF_DESIGN', 'WF_PUBLISH'] },
       { href: '/org', label: '组织架构', icon: Users, permissions: ['ORG_MANAGE'] },
+      { href: '/stats', label: '统计', icon: ChartColumn, permissions: ['STATS_READ'] },
     ],
   },
 ];

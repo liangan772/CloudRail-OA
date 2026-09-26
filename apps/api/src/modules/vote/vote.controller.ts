@@ -1,5 +1,7 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { z } from 'zod';
+import { paginationQuerySchema } from '@oa/shared';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
@@ -16,6 +18,8 @@ import {
   type RevokeAbsentBody,
   type SubmitConclusionBody,
 } from './vote.dto';
+
+const myPendingQuerySchema = paginationQuerySchema;
 
 @ApiTags('vote')
 @Controller('instances/:id')
@@ -65,6 +69,7 @@ export class VoteController {
   progress(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseIntPipe) id: number) {
     return this.votes.getProgress(user, id);
   }
+
 
   @Post('conclusion')
   @RequirePermissions('NODE_CONCLUDE')
