@@ -1,12 +1,13 @@
 import { Module } from '@nestjs/common';
 import { InstanceModule } from '../instance/instance.module';
+import { RuleEngineModule } from '../rule/rule-engine.module';
 import { ConclusionService } from './conclusion.service';
 import { NodeContextService } from './node-context.service';
 import { VoteController } from './vote.controller';
 import { VoteService } from './vote.service';
 
 @Module({
-  imports: [InstanceModule],
+  imports: [InstanceModule, RuleEngineModule],
   controllers: [VoteController],
   providers: [VoteService, ConclusionService, NodeContextService],
   exports: [VoteService, ConclusionService, NodeContextService],

@@ -15,6 +15,8 @@ import { resolveVotingPool } from '../../domain/vote/tally';
 import { planConclusion } from '../../domain/workflow/conclusion-policy';
 import { transitionInstance, transitionNode, type NodeEvent } from '../../domain/workflow/state-machines';
 import { NodeContextService, type NodeContext, type Tx } from './node-context.service';
+import { RuleEngineService } from '../rule/rule-engine.service';
+import type { EscalationEvaluationResult } from '../../domain/rule/rule-engine';
 import type { CastVoteBody, MarkAbsentBody, RevokeAbsentBody } from './vote.dto';
 
 /** 池内已表态人数（VOTED / DELEGATED） */
@@ -27,6 +29,7 @@ export class VoteService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly contexts: NodeContextService,
+    private readonly rules: RuleEngineService,
   ) {}
 
   /* ---------------------------- 投票 / 改票 ---------------------------- */
@@ -87,7 +90,7 @@ export class VoteService {
         data: { status: 'VOTED', votedAt: now },
       });
 
-      const applied = await this.recomputeAndApply(tx, ctx);
+      const applied = await this.recomputeAndApply(tx, ctx, user);
 
       return {
         instanceId,
@@ -102,6 +105,7 @@ export class VoteService {
         systemDecision: applied.systemDecision,
         appliedEvents: applied.appliedEvents,
         reason: applied.reason,
+        escalation: applied.escalation,
       };
     });
   }
@@ -152,7 +156,7 @@ export class VoteService {
         },
       });
 
-      const applied = await this.recomputeAndApply(tx, ctx, guard.status as string);
+      const applied = await this.recomputeAndApply(tx, ctx, user, guard.status as string);
 
       return {
         instanceId,
@@ -195,7 +199,7 @@ export class VoteService {
         },
       });
 
-      const applied = await this.recomputeAndApply(tx, ctx, guard.status as string);
+      const applied = await this.recomputeAndApply(tx, ctx, user, guard.status as string);
 
       return {
         instanceId,
@@ -291,6 +295,7 @@ export class VoteService {
   private async recomputeAndApply(
     tx: Tx,
     ctx: NodeContext,
+    user: AuthenticatedUser,
     forcedStatus?: string,
   ): Promise<{
     nodeStatus: string;
@@ -307,6 +312,7 @@ export class VoteService {
     systemDecision: string;
     appliedEvents: NodeEvent[];
     reason: string;
+    escalation: { matched: EscalationEvaluationResult['matched']; errors: string[] } | null;
   }> {
     const [voters, votes] = await Promise.all([
       tx.instanceNodeVoter.findMany({
@@ -333,6 +339,91 @@ export class VoteService {
       rule: ctx.rule,
     };
     const decision = decideNodeProgress(input);
+    const { tally } = decision;
+
+    /**
+     * 上报条件优先于正常结论：本层即将进入结论阶段时，先跑节点上的上报规则
+     * （如「金额超 5 万自动上报」）。命中就上报，不写拟判定结论 ——
+     * 否则会出现"既出了结论又上报"的双份口径。
+     */
+    const wouldEnterConclusion =
+      decision.events.includes('VETO_TERMINATE') || (decision.allStated && decision.readyForConclusion);
+    let escalationResult: EscalationEvaluationResult | null = null;
+
+    if (wouldEnterConclusion) {
+      escalationResult = await this.rules.checkForNode(tx, {
+        tenantId: ctx.instance.tenantId,
+        nodeId: ctx.node.nodeId,
+        instance: {
+          id: ctx.instance.id,
+          code: ctx.instance.code,
+          title: ctx.instance.title,
+          status: ctx.instance.status,
+          layerIndex: ctx.node.layerIndex,
+          priority: ctx.instance.priority,
+        },
+        formData: ctx.instance.formData,
+        actor: { userId: user.userId },
+        voteResult: {
+          approve: tally.counts.approve,
+          reject: tally.counts.reject,
+          denominator: tally.denominator,
+          passed: tally.systemDecision === 'APPROVE',
+          tie: tally.tieDetected,
+        },
+      });
+
+      if (escalationResult.matched.length > 0) {
+        const transition = transitionNode({ status: ctx.node.status as never }, 'ESCALATE');
+        if (!transition.ok) throw AppError.fromDef(transition.error, transition.reason);
+
+        const triggers = escalationResult.matched.map((hit) => ({
+          ruleId: hit.ruleId,
+          triggerType: hit.triggerType,
+          triggerLabel: hit.triggerLabel,
+          reason: hit.reason,
+          target: hit.target,
+        }));
+
+        await tx.instanceNode.update({
+          where: { id: ctx.node.id },
+          data: {
+            status: transition.status as never,
+            // 上报单实体与冻结在阶段 3 的 EscalationEngine 落地；这里先把命中依据落进 result，避免丢信息
+            result: { escalationPending: { triggers, decidedAt: new Date().toISOString() } } as unknown as Prisma.InputJsonValue,
+          },
+        });
+
+        if (ctx.instance.status === 'VOTING') {
+          const escalated = transitionInstance({ status: 'VOTING', escalationTriggered: true }, 'ESCALATE');
+          if (!escalated.ok) throw AppError.fromDef(escalated.error, escalated.reason);
+          await tx.workflowInstance.update({
+            where: { id: ctx.instance.id },
+            data: { status: escalated.status },
+          });
+        }
+
+        return {
+          nodeStatus: transition.status as string,
+          vetoLocked: decision.vetoLocked || ctx.node.vetoLocked,
+          conclusionStatus: ctx.node.conclusionStatus,
+          progress: {
+            expected: tally.pool.expected,
+            pool: tally.pool.pool,
+            stated: statedCount(input.voters),
+            approve: tally.counts.approve,
+            reject: tally.counts.reject,
+            quorumSatisfied: tally.pool.quorumSatisfied,
+          },
+          systemDecision: tally.systemDecision,
+          appliedEvents: ['ESCALATE'],
+          reason: `命中上报规则：${triggers
+            .map((trigger) => `${trigger.triggerLabel}（${trigger.reason}）`)
+            .join('；')}`,
+          escalation: { matched: escalationResult.matched, errors: escalationResult.errors },
+        };
+      }
+    }
 
     let status = forcedStatus ?? ctx.node.status;
     let vetoLocked = ctx.node.vetoLocked;
@@ -430,6 +521,8 @@ export class VoteService {
       systemDecision: decision.tally.systemDecision,
       appliedEvents,
       reason: decision.reason,
+      // 未命中时也要把规则自身的错误带出去（脏规则不能静默消失）
+      escalation: escalationResult ? { matched: escalationResult.matched, errors: escalationResult.errors } : null,
     };
   }
 }

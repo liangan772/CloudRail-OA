@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | 0 | 需求澄清、信息架构、技术选型、数据模型草案 | ✅ 已完成 |
 | 1 | Prisma Schema、共享类型与枚举、种子数据 | ✅ 已完成（迁移与种子已在宝塔 PostgreSQL 16.3 实跑通过） |
-| 2 | 后端核心：Auth / Org / Workflow / VoteEngine / NodeStateMachine / RuleEngine | 🚧 进行中（VoteEngine / NodeStateMachine / VoteConclusion 已落地，65 个单测全绿） |
+| 2 | 后端核心：Auth / Org / Workflow / VoteEngine / NodeStateMachine / RuleEngine | ✅ 已完成（22 条路由，189 个单测全绿；待真实库 e2e） |
 | 3 | 后端扩展：TaskEngine / EscalationEngine / BullMQ / WebSocket / 审计 / Outbox | ⏸ 待开始 |
 | 4 | 前端基础：布局、主题、路由、API Client、状态管理、通用组件 | ⏸ 待开始 |
 | 5 | 前端业务：工作台、投票中心、流程详情、任务中心、上报中心、流程设计器、统计 | ⏸ 待开始 |

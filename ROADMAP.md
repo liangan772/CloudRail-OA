@@ -30,7 +30,7 @@
 | --- | --- | --- | --- |
 | 0 | 需求澄清、信息架构、技术选型、数据模型草案 | `ROADMAP.md`、`docs/stage-0/*`（含 Q1–Q27 冻结基线） | ✅ 已完成，等待「进入阶段 1」指令 |
 | 1 | Prisma Schema、共享类型与枚举、种子数据 | `apps/api/prisma/schema.prisma`（44 模型/41 枚举/75 索引）、`packages/shared`（枚举+常量+DSL）、幂等 seed、脚手架、`prisma/migrations/*` | ✅ 已完成：`validate`/`generate`/typecheck 全绿；**migrate + seed 已对宝塔 PostgreSQL 16.3 实跑通过**（init 迁移 + 部分索引迁移；种子 1 租户/3 部门/8 工号成员/9 用户/5 角色/36 权限/2 模板/3 序列） |
-| 2 | 后端核心：Auth、Org、Workflow、VoteEngine、NodeStateMachine、RuleEngine、**投票结论（VoteConclusion）** | 可运行的 API + 单测（计票/全员表态/结论/状态机/规则求值） | 🚧 进行中：**主线已打通** —— Auth、Org、Workflow 模板发布、实例发起、**投票/改票、标记缺席、人工结论与层级推进**全部落地；21 条路由、Swagger、`/health` `/metrics`，`nest build` 可启动；共 **171 个单测（14 套件）全绿**。待做：RuleEngine 接线（条件上报）、任务引擎（阶段 3）、真实库 e2e |
+| 2 | 后端核心：Auth、Org、Workflow、VoteEngine、NodeStateMachine、RuleEngine、**投票结论（VoteConclusion）** | 可运行的 API + 单测（计票/全员表态/结论/状态机/规则求值） | ✅ **代码已完成**：Auth（JWT + 三级守卫）、Org、Workflow 模板发布与图校验、实例发起与投票人快照、投票/改票、标记缺席、人工结论与层级推进、**RuleEngine 条件上报**；22 条路由 + Swagger + `/health` `/metrics`，`nest build` 可启动；**189 个单测（15 套件）全绿**。遗留：真实库 e2e 未跑（需数据库可达）、任务引擎属阶段 3 |
 | 3 | 后端扩展：TaskEngine、EscalationEngine（逐级 + 上级投票复用同一 `VoteEngine`）、BullMQ、WebSocket、审计、Outbox | 队列消费者 + 网关 + 审计与发件箱 | ⏸ 未开始 |
 | 4 | 前端基础：布局、主题、路由、API Client、状态管理、通用组件 | 设计系统 + 应用骨架 + 可登录 | ⏸ 未开始 |
 | 5 | 前端业务：工作台、投票中心、流程详情、任务中心、上报中心、流程设计器、统计 | 全部业务页面可交互 | ⏸ 未开始 |

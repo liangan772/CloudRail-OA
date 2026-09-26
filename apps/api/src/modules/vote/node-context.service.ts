@@ -16,6 +16,10 @@ export interface NodeContext {
     currentNodeId: number | null;
     templateVersionId: number;
     layerIndex: number;
+    code: string;
+    title: string;
+    priority: string;
+    formData: Record<string, unknown>;
   };
   node: {
     id: number;
@@ -64,6 +68,10 @@ export class NodeContextService {
         currentNodeId: true,
         templateVersionId: true,
         layerIndex: true,
+        code: true,
+        title: true,
+        priority: true,
+        formData: true,
       },
     });
     if (!instance) throw AppError.of('SYS_NOT_FOUND');
@@ -95,6 +103,10 @@ export class NodeContextService {
         currentNodeId: instance.currentNodeId,
         templateVersionId: instance.templateVersionId,
         layerIndex: instance.layerIndex,
+        code: instance.code,
+        title: instance.title,
+        priority: instance.priority,
+        formData: (instance.formData ?? {}) as Record<string, unknown>,
       },
       node: {
         id: node.id,

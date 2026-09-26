@@ -157,8 +157,20 @@ function buildFake(options: { deadline?: Date; voterIds?: number[]; nodeStatus?:
   return { prisma, tx, state };
 }
 
-function buildService(prisma: unknown): VoteService {
-  return new VoteService(prisma as never, new NodeContextService(prisma as never));
+/** 最近一次构造用到的规则引擎替身（供用例断言"有没有真的去问规则引擎"） */
+let lastRules: { checkForNode: jest.Mock } | null = null;
+
+/** 装配被测服务；`escalation` 传入时表示规则引擎会命中上报 */
+function buildService(prisma: unknown, escalation?: { matched: unknown[]; errors: string[] }): VoteService {
+  const rules = {
+    checkForNode: jest.fn().mockResolvedValue(
+      escalation
+        ? { hits: escalation.matched, matched: escalation.matched, errors: escalation.errors, ruleCount: escalation.matched.length, allowCrossLevel: false }
+        : { hits: [], matched: [], errors: [], ruleCount: 0, allowCrossLevel: false },
+    ),
+  };
+  lastRules = rules;
+  return new VoteService(prisma as never, new NodeContextService(prisma as never), rules as never);
 }
 
 describe('投票闭环 · 记票与自动推进', () => {
@@ -273,5 +285,77 @@ describe('投票闭环 · 守卫', () => {
     const error = await service.castVote(voter(99), 501, { decision: 'APPROVE' }).catch((e) => e);
     expect(error).toBeInstanceOf(AppError);
     expect((error as AppError).httpStatus).toBe(403);
+  });
+});
+
+describe('投票闭环 · 上报规则接线', () => {
+  const matchedRule = {
+    ruleId: 21,
+    triggerType: 'OVER_LIMIT',
+    triggerLabel: '金额/风险超限',
+    matched: true,
+    reason: '条件命中：formData.amount 大于 50000（实际 80000）',
+    condition: { gt: ['formData.amount', 50000] },
+    target: {
+      targetDeptRule: 'DIRECT_PARENT',
+      timeoutHours: 48,
+      freezeSource: true,
+      maxLevel: 5,
+      acceptMode: 'AUTO',
+      onMissingWorkNo: 'ESCALATE_UP',
+    },
+  };
+
+  it('只记一票时不去问规则引擎（还没到出结论的时机）', async () => {
+    const { prisma } = buildFake();
+    const service = buildService(prisma, { matched: [matchedRule], errors: [] });
+
+    const result = await service.castVote(voter(3), 501, { decision: 'APPROVE' });
+
+    expect(lastRules!.checkForNode).not.toHaveBeenCalled();
+    expect(result.escalation).toBeNull();
+  });
+
+  it('池内全员表态且命中上报规则 → 转 ESCALATED，且不写拟判定结论', async () => {
+    const { prisma, tx, state } = buildFake();
+    const service = buildService(prisma, { matched: [matchedRule], errors: [] });
+
+    await service.castVote(voter(3), 501, { decision: 'APPROVE' });
+    const result = await service.castVote(voter(4), 501, { decision: 'APPROVE' });
+
+    expect(lastRules!.checkForNode).toHaveBeenCalledTimes(1);
+    expect(result.appliedEvents).toEqual(['ESCALATE']);
+    expect(result.nodeStatus).toBe('ESCALATED');
+    expect(result.reason).toContain('命中上报规则');
+    expect(result.reason).toContain('金额/风险超限');
+    // 关键：不能既出结论又上报
+    expect(state.voteResult).toBeNull();
+    expect(tx.voteResult.upsert).not.toHaveBeenCalled();
+    // 命中依据落进 node.result，避免 Escalation 实体落地前丢信息
+    expect(tx.instanceNode.update).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'ESCALATED',
+          result: expect.objectContaining({ escalationPending: expect.anything() }),
+        }),
+      }),
+    );
+    // 实例同步进入上报中
+    expect(state.instanceStatus).toBe('ESCALATED');
+  });
+
+  it('未命中时把规则自身的错误带出去（脏规则不静默消失）', async () => {
+    const { prisma } = buildFake();
+    const service = buildService(prisma, {
+      matched: [],
+      errors: ['上报规则 #7（金额/风险超限）求值失败：未知操作符: weirdOp'],
+    });
+
+    await service.castVote(voter(3), 501, { decision: 'APPROVE' });
+    const result = await service.castVote(voter(4), 501, { decision: 'APPROVE' });
+
+    expect(result.nodeStatus).toBe('PENDING_CONCLUSION');
+    expect(result.escalation?.errors).toHaveLength(1);
+    expect(result.escalation?.errors[0]).toContain('求值失败');
   });
 });
