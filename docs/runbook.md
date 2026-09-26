@@ -129,6 +129,8 @@ CREATE TABLE IF NOT EXISTS audit_logs_<YYYY_MM> PARTITION OF audit_logs
 | 页面能开但数据不刷 | 前端 `/api` rewrite 目标不对 | 检查 `NEXT_PUBLIC_API_BASE_URL`；容器内应指向 `http://api:3001` |
 | 页面能开但报"请求失败"、web 日志里是连 `127.0.0.1:3001` | rewrite 目标是**构建期**烘焙进 `.next/routes-manifest.json` 的，只在运行期设环境变量无效 | 改 `docker/docker-compose.prod.yml` 的 `web.build.args` 后**重建**（`up -d --build web`）。校验：`docker compose ... exec web node -e "console.log(require('/app/apps/web/.next/routes-manifest.json').rewrites)"` 应看到 `http://api:3001` |
 | 迁移未应用 | 手工迁移文件没跑 | `pnpm --filter @oa/api db:deploy` |
+| `db:seed` 报 `Error: Cannot find module './data/org'`（`ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL ... db:seed`） | `.dockerignore` / `.gitignore` 里曾有**未锚定**的 `data` 规则，把源码目录 `apps/api/prisma/seed/data/` 一起忽略了：仓库里没这三个文件、镜像构建上下文里也没有 | 已修（两条规则都改成 `/data`）。确认 `apps/api/prisma/seed/data/{org,roles,templates}.ts` 已入库，再 `docker compose --env-file .env -f docker/docker-compose.prod.yml up -d --build api` 重建镜像 |
+| `db:seed` 报 `ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL`，但看不到真正原因 | 这只是 pnpm 的外层包装，真实错误在它**上面几行**（seed 自己会打印 `✘ 种子数据失败：<error>`） | 绕开包装层直接看：`docker compose ... exec api pnpm --filter @oa/api exec tsx prisma/seed/index.ts` |
 
 ## 7. 数据清理
 

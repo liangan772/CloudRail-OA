@@ -12,9 +12,12 @@ dist
 *.tsbuildinfo
 
 # 运行期数据与备份（不要打进镜像）
-data
-uploads
-backups
+# ⚠️ 同样必须锚定根目录（前缀 /）。裸写 `data` 会把 apps/api/prisma/seed/data/
+#    一起排除出构建上下文，镜像里就没有种子数据，容器内 db:seed 会报
+#    "Cannot find module './data/org'"。
+/data
+/uploads
+/backups
 docker/backups
 docker/volumes
 

@@ -27,9 +27,14 @@ apps/api/prisma/*.db
 apps/api/prisma/migrations/dev/
 
 # 运行期数据（本地部署）
-data/
-uploads/
-backups/
+# ⚠️ 必须锚定仓库根目录（前缀 /）。裸写 `data/` 会匹配**任意层级**的 data 目录，
+#    会把源码目录 apps/api/prisma/seed/data/ 一起忽略掉 —— 曾经就这么踩过：
+#    种子数据文件从未入库，服务器 clone 下来跑 db:seed 直接
+#    "Cannot find module './data/org'"。
+/data/
+/uploads/
+/backups/
+docker/backups/
 docker/volumes/
 
 # 日志
