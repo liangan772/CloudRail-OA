@@ -1,0 +1,1372 @@
+// CloudRail OA · Prisma Schema（阶段 1）
+// 口径来源：docs/stage-0/04-domain-model-draft.md（阶段 0 冻结基线）
+// 约定：表名 snake_case（@@map），列名 camelCase；所有业务表带 tenantId。
+// 说明：部分索引（WHERE status IN (...)、text_pattern_ops 前缀索引）Prisma schema 无法表达，
+//       在迁移 SQL 中通过 raw SQL 追加，见 prisma/migrations/README.md。
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// 枚举
+// ============================================================
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+  LOCKED
+}
+
+enum DepartmentStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum PermissionType {
+  MENU
+  ACTION
+  DATA
+}
+
+enum ScopeType {
+  SELF
+  DEPT
+  DEPT_AND_SUB
+  DEPT_LIST
+  TENANT
+}
+
+enum TemplateStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum WorkflowNodeType {
+  START
+  VOTE
+  TASK
+  ESCALATION
+  CONDITION
+  END
+}
+
+enum InstanceStatus {
+  DRAFT
+  VOTING
+  APPROVED
+  REJECTED
+  ESCALATED
+  SUSPENDED
+  CLOSED
+}
+
+enum InstanceNodeStatus {
+  PENDING
+  VOTING
+  PENDING_CONCLUSION
+  PASSED
+  REJECTED
+  TIMEOUT
+  ESCALATED
+  SKIPPED
+  DONE
+}
+
+enum ConclusionMode {
+  AUTO
+  MANUAL_CONFIRM
+  MANUAL_OVERRIDE
+}
+
+enum ConclusionStatus {
+  NOT_REQUIRED
+  PENDING
+  SUBMITTED
+  TIMEOUT
+}
+
+enum ConclusionDecision {
+  APPROVE
+  REJECT
+}
+
+enum DeadlineMode {
+  CALENDAR_DAY
+  WORKING_DAY
+}
+
+enum VoterType {
+  USER
+  ROLE
+  DEPARTMENT
+  VOTE_GROUP
+  DEPT_WORKNO
+  DYNAMIC
+}
+
+enum PassRule {
+  ALL
+  MAJORITY
+  RATIO
+  WEIGHTED
+  AT_LEAST_N
+}
+
+enum RejectRule {
+  ANY_VETO
+  OPPOSE_OVER
+  NONE
+}
+
+enum AbstainPolicy {
+  COUNT_IN_DENOMINATOR
+  EXCLUDE_FROM_DENOMINATOR
+  AS_APPROVE
+  AS_REJECT
+}
+
+enum TimeoutPolicy {
+  REMIND_ONLY
+  AUTO_REJECT
+  ESCALATE
+  AUTO_APPROVE
+}
+
+enum VoteVisibility {
+  PUBLIC
+  RESULT_ONLY
+  ANONYMOUS
+}
+
+enum VoteViewScope {
+  DEPT_ONLY
+  TENANT
+}
+
+enum VoteDecision {
+  APPROVE
+  REJECT
+  ABSTAIN
+}
+
+enum RevotePolicy {
+  NOT_ALLOWED
+  ONCE
+  UNLIMITED_BEFORE_CONCLUSION
+}
+
+enum TiePolicy {
+  ESCALATE
+  REJECT
+  CHAIRMAN_VOTE
+}
+
+enum VoterStatus {
+  PENDING
+  VOTED
+  TIMEOUT
+  DELEGATED
+  SKIPPED
+  ABSENT
+}
+
+enum AbsenceSource {
+  MANUAL
+  LEAVE_SYNC
+  DECLARED
+}
+
+enum QuorumPolicy {
+  MIN_POOL_RATIO
+  NONE
+  MIN_POOL_N
+}
+
+enum TaskStatus {
+  PENDING_ASSIGN
+  PENDING_ACCEPT
+  IN_PROGRESS
+  PENDING_ACCEPTANCE
+  DONE
+  OVERDUE
+  CANCELLED
+  BLOCKED
+  ESCALATED
+}
+
+enum TaskPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum TaskAssigneeRole {
+  OWNER
+  COLLABORATOR
+  WATCHER
+  ACCEPTOR
+}
+
+enum AssigneeRuleType {
+  MANUAL
+  ROLE
+  DEPARTMENT
+  VOTE_GROUP
+  DEPT_WORKNO
+  LOAD_BALANCE
+  GRAB
+}
+
+enum TaskDependencyType {
+  FINISH_TO_START
+  START_TO_START
+}
+
+enum EscalationSourceType {
+  VOTE
+  TASK
+  INSTANCE
+  MANUAL
+}
+
+enum EscalationStatus {
+  PENDING
+  SUBMITTED
+  SIGNED
+  VOTING
+  PENDING_CONCLUSION
+  ADOPTED
+  RETURNED
+  UPGRADED
+  CLOSED
+}
+
+enum EscalationTrigger {
+  MANUAL
+  TIMEOUT
+  TIE
+  REPEATED_REJECT
+  OVER_LIMIT
+  CROSS_DEPT_DISPUTE
+  INSUFFICIENT_PERMISSION
+  TASK_BLOCKED
+  TASK_OVERDUE
+  CONCLUSION_TIMEOUT
+  QUORUM_NOT_MET
+}
+
+enum TargetDeptRule {
+  DIRECT_PARENT
+  LEVEL_UP
+  SPECIFIC_DEPT
+  SKIP_TO_LEVEL
+  BY_RULE
+}
+
+enum EscalationAction {
+  SIGN
+  START_VOTE
+  CAST_VOTE
+  SUBMIT_CONCLUSION
+  CONTINUE
+  RETURN
+  REQUEST_MORE
+  UPGRADE
+  FINAL_APPROVE
+  FINAL_REJECT
+  CLOSE
+}
+
+enum WriteBackAction {
+  CONTINUE
+  RETURN
+  REQUEST_MORE
+  FINAL_APPROVE
+  FINAL_REJECT
+}
+
+enum EscalationAcceptMode {
+  AUTO
+  GRAB
+  ASSIGNED
+}
+
+enum WorkNoMissingPolicy {
+  ESCALATE_UP
+  NOTIFY_ADMIN
+  BLOCK
+}
+
+enum NotificationType {
+  VOTE_PENDING
+  VOTE_RESULT
+  CONCLUSION_PENDING
+  TASK_ASSIGNED
+  TASK_OVERDUE
+  ESCALATION_CREATED
+  ESCALATION_VOTING
+  ESCALATION_HANDLED
+  INSTANCE_FINISHED
+  SYSTEM
+}
+
+enum OutboxStatus {
+  PENDING
+  PROCESSING
+  SENT
+  FAILED
+  DEAD
+}
+
+enum StorageDriver {
+  local
+  s3
+}
+
+// ============================================================
+// 组织与权限
+// ============================================================
+
+model Tenant {
+  id     Int     @id @default(autoincrement())
+  name   String  @db.VarChar(128)
+  code   String  @unique @db.VarChar(64)
+  status String  @default("ACTIVE") @db.VarChar(16)
+
+  /// 越级上报开关：用户已确认默认禁用
+  allowCrossLevel  Boolean @default(false)
+  /// 超时自动通过开关：与「必须表态」冲突，默认禁用
+  allowAutoApprove Boolean @default(false)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  users       User[]
+  departments Department[]
+  roles       Role[]
+  templates   WorkflowTemplate[]
+  instances   WorkflowInstance[]
+
+  @@map("tenants")
+}
+
+model User {
+  id           Int        @id @default(autoincrement())
+  tenantId     Int
+  name         String     @db.VarChar(64)
+  email        String     @db.VarChar(128)
+  phone        String?    @db.VarChar(32)
+  avatar       String?    @db.VarChar(512)
+  status       UserStatus @default(ACTIVE)
+  passwordHash String     @db.VarChar(255)
+
+  lastLoginAt      DateTime? @db.Timestamptz(3)
+  failedLoginCount Int       @default(0)
+  lockedUntil      DateTime? @db.Timestamptz(3)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  tenant          Tenant           @relation(fields: [tenantId], references: [id])
+  departments     UserDepartment[]
+  roles           UserRole[]
+  managedDepts    Department[]     @relation("DepartmentManager")
+  workNoMembers   DepartmentWorkNoMember[]
+  instanceNodeVoters InstanceNodeVoter[]
+  votes           Vote[]
+  conclusions     VoteConclusion[]
+  notifications   Notification[]
+  auditLogs       AuditLog[]
+  ownedTasks      TaskAssignee[]
+  createdTasks    Task[]           @relation("TaskCreator")
+  escalations     Escalation[]     @relation("EscalationRequester")
+  handledEscalations Escalation[]  @relation("EscalationHandler")
+
+  @@unique([tenantId, email])
+  @@unique([tenantId, phone])
+  @@index([tenantId, status])
+  @@map("users")
+}
+
+model Department {
+  id         Int              @id @default(autoincrement())
+  tenantId   Int
+  name       String           @db.VarChar(128)
+  parentId   Int?
+  /// 物化路径，形如 /1/3/7/
+  path       String           @db.VarChar(512)
+  level      Int
+  managerId  Int?
+  code       String?          @db.VarChar(64)
+  /// 部门工号：上报统一投递到上级部门的工号
+  workNo     String?          @db.VarChar(64)
+  sort       Int              @default(0)
+  status     DepartmentStatus @default(ACTIVE)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  tenant    Tenant       @relation(fields: [tenantId], references: [id])
+  parent    Department?  @relation("DepartmentTree", fields: [parentId], references: [id])
+  children  Department[] @relation("DepartmentTree")
+  manager   User?        @relation("DepartmentManager", fields: [managerId], references: [id])
+  members   UserDepartment[]
+  workNoMembers DepartmentWorkNoMember[]
+
+  @@unique([tenantId, code])
+  @@unique([tenantId, workNo])
+  @@index([tenantId, parentId])
+  @@index([tenantId, path(ops: raw("text_pattern_ops"))])
+  @@map("departments")
+}
+
+/// 部门工号的操盘人：工号成员即该级上报的投票人
+model DepartmentWorkNoMember {
+  id           Int      @id @default(autoincrement())
+  tenantId     Int
+  departmentId Int
+  userId       Int
+  /// 主责人：只决定"谁默认填写结论"，不决定谁才有票
+  isPrimary    Boolean  @default(false)
+  receiveNotify Boolean @default(true)
+  status       String   @default("ACTIVE") @db.VarChar(16)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  department Department @relation(fields: [departmentId], references: [id])
+  user       User       @relation(fields: [userId], references: [id])
+
+  @@unique([departmentId, userId])
+  @@index([tenantId, userId])
+  @@map("department_workno_members")
+}
+
+model UserDepartment {
+  id           Int     @id @default(autoincrement())
+  tenantId     Int
+  userId       Int
+  departmentId Int
+  isPrimary    Boolean @default(false)
+  isLeader     Boolean @default(false)
+  title        String? @db.VarChar(64)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  user       User       @relation(fields: [userId], references: [id])
+  department Department @relation(fields: [departmentId], references: [id])
+
+  @@unique([userId, departmentId])
+  @@index([departmentId, isLeader])
+  @@map("user_departments")
+}
+
+model Role {
+  id               Int     @id @default(autoincrement())
+  tenantId         Int
+  name             String  @db.VarChar(64)
+  code             String  @db.VarChar(64)
+  isSystem         Boolean @default(false)
+  dataScopeDefault ScopeType @default(SELF)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  tenant      Tenant           @relation(fields: [tenantId], references: [id])
+  permissions RolePermission[]
+  users       UserRole[]
+
+  @@unique([tenantId, code])
+  @@map("roles")
+}
+
+model Permission {
+  id     Int            @id @default(autoincrement())
+  code   String         @unique @db.VarChar(64)
+  name   String         @db.VarChar(128)
+  type   PermissionType @default(ACTION)
+  module String         @db.VarChar(64)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  roles RolePermission[]
+
+  @@index([module])
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       Int
+  permissionId Int
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model UserRole {
+  id        Int       @id @default(autoincrement())
+  tenantId  Int
+  userId    Int
+  roleId    Int
+  scopeType ScopeType @default(SELF)
+  scopeId   Int?
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId, scopeType, scopeId])
+  @@index([scopeType, scopeId])
+  @@map("user_roles")
+}
+
+model VoteGroup {
+  id       Int    @id @default(autoincrement())
+  tenantId Int
+  name     String @db.VarChar(128)
+  code     String @db.VarChar(64)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  members VoteGroupMember[]
+
+  @@unique([tenantId, code])
+  @@map("vote_groups")
+}
+
+model VoteGroupMember {
+  groupId Int
+  userId  Int
+  weight  Decimal @default(1) @db.Decimal(10, 4)
+
+  group VoteGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@id([groupId, userId])
+  @@map("vote_group_members")
+}
+
+// ============================================================
+// 流程模板（发布后不可变）
+// ============================================================
+
+model WorkflowTemplate {
+  id               Int            @id @default(autoincrement())
+  tenantId         Int
+  name             String         @db.VarChar(128)
+  code             String         @db.VarChar(64)
+  category         String         @db.VarChar(64)
+  status           TemplateStatus @default(DRAFT)
+  currentVersionId Int?
+  description      String?        @db.Text
+  icon             String?        @db.VarChar(64)
+  /// 表单结构（JSON Schema 子集），前端按它渲染
+  formSchema       Json           @default("{}")
+  /// 默认截止时间口径（已确认：自然日）
+  deadlineMode     DeadlineMode   @default(CALENDAR_DAY)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  tenant   Tenant            @relation(fields: [tenantId], references: [id])
+  versions WorkflowVersion[]
+  instances WorkflowInstance[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, status])
+  @@map("workflow_templates")
+}
+
+model WorkflowVersion {
+  id          Int      @id @default(autoincrement())
+  tenantId    Int
+  templateId  Int
+  version     Int
+  config      Json     @default("{}")
+  publishedAt DateTime? @db.Timestamptz(3)
+  publishedBy Int?
+  changelog   String?  @db.Text
+  /// 发布后锁死，保证实例可复现
+  isLocked    Boolean  @default(false)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  template  WorkflowTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  nodes     WorkflowNode[]
+  edges     WorkflowEdge[]
+  instances WorkflowInstance[]
+
+  @@unique([templateId, version])
+  @@index([tenantId, templateId])
+  @@map("workflow_versions")
+}
+
+model WorkflowNode {
+  id         Int              @id @default(autoincrement())
+  tenantId   Int
+  versionId  Int
+  type       WorkflowNodeType
+  name       String           @db.VarChar(128)
+  order      Int
+  config     Json             @default("{}")
+  /// 层号：由 VOTE 节点定义"第几层"
+  layerIndex Int?
+  /// 设计器与前后端引用的稳定 key
+  nodeKey    String           @db.VarChar(64)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  version       WorkflowVersion   @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  voterRules    NodeVoterRule[]
+  voteRule      NodeVoteRule?
+  taskTemplates NodeTaskTemplate[]
+  escRules      NodeEscalationRule[]
+  outgoingEdges WorkflowEdge[]    @relation("EdgeFrom")
+  incomingEdges WorkflowEdge[]    @relation("EdgeTo")
+  instanceNodes InstanceNode[]
+
+  @@unique([versionId, nodeKey])
+  @@index([versionId, order])
+  @@map("workflow_nodes")
+}
+
+model WorkflowEdge {
+  id         Int    @id @default(autoincrement())
+  tenantId   Int
+  versionId  Int
+  fromNodeId Int
+  toNodeId   Int
+  /// 条件规则（DSL）；空表示无条件
+  condition  Json?
+  priority   Int    @default(0)
+  label      String? @db.VarChar(128)
+
+  version  WorkflowVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  fromNode WorkflowNode    @relation("EdgeFrom", fields: [fromNodeId], references: [id])
+  toNode   WorkflowNode    @relation("EdgeTo", fields: [toNodeId], references: [id])
+
+  @@index([versionId, fromNodeId, priority])
+  @@map("workflow_edges")
+}
+
+model NodeVoterRule {
+  id         Int       @id @default(autoincrement())
+  tenantId   Int
+  nodeId     Int
+  voterType  VoterType
+  voterValue Json
+  weight     Decimal   @default(1) @db.Decimal(10, 4)
+  isRequired Boolean   @default(true)
+  order      Int       @default(0)
+
+  node WorkflowNode @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  @@index([nodeId])
+  @@map("node_voter_rules")
+}
+
+/// 节点投票规则：1:1
+model NodeVoteRule {
+  id               Int            @id @default(autoincrement())
+  tenantId         Int
+  nodeId           Int            @unique
+  passRule         PassRule
+  passThreshold    Decimal?       @db.Decimal(10, 4)
+  rejectRule       RejectRule     @default(NONE)
+  rejectThreshold  Decimal?       @db.Decimal(10, 4)
+  abstainPolicy    AbstainPolicy  @default(EXCLUDE_FROM_DENOMINATOR)
+  timeoutPolicy    TimeoutPolicy  @default(REMIND_ONLY)
+  visibility       VoteVisibility @default(RESULT_ONLY)
+
+  /// 可见范围：默认仅本部门；上报链上级部门由覆盖规则放行
+  viewScope        VoteViewScope  @default(DEPT_ONLY)
+  /// 已确认：不允许弃权（恒 false）
+  allowAbstain     Boolean        @default(false)
+  /// 已确认：池内全员必须表态
+  requireAllVote   Boolean        @default(true)
+  /// 已确认：结论形成前可反复更改
+  revotePolicy     RevotePolicy   @default(UNLIMITED_BEFORE_CONCLUSION)
+  /// 一票否决是否立即终结投票（默认只锁定不予通过）
+  vetoTerminates   Boolean        @default(false)
+  /// 已确认：平票报上级组织裁定
+  tiePolicy        TiePolicy      @default(ESCALATE)
+  /// 已确认：结论必须人工填写
+  conclusionMode   ConclusionMode @default(MANUAL_CONFIRM)
+  conclusionAuthorRule Json?
+
+  timeoutHours           Int      @default(24)
+  remindIntervalHours    Int      @default(8)
+  maxRemindRounds        Int      @default(3)
+  conclusionTimeoutHours Int      @default(24)
+
+  /// 法定人数下限（已确认启用，默认 60%）
+  quorumPolicy     QuorumPolicy @default(MIN_POOL_RATIO)
+  minQuorum        Decimal      @default(0.6) @db.Decimal(5, 4)
+  allowMarkAbsent  Boolean      @default(true)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  node WorkflowNode @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  @@map("node_vote_rules")
+}
+
+model NodeTaskTemplate {
+  id           Int      @id @default(autoincrement())
+  tenantId     Int
+  nodeId       Int
+  title        String   @db.VarChar(200)
+  assigneeRule Json
+  priority     TaskPriority @default(NORMAL)
+  /// 自节点开始后的偏移小时数
+  dueOffset    Int      @default(24)
+  checklist    Json     @default("[]")
+  acceptanceRule Json?
+  /// PASS：本层通过后创建；ALWAYS：节点开启即创建
+  triggerOn    String   @default("PASS") @db.VarChar(16)
+  order        Int      @default(0)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  node WorkflowNode @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  @@index([nodeId, order])
+  @@map("node_task_templates")
+}
+
+model NodeEscalationRule {
+  id             Int              @id @default(autoincrement())
+  tenantId       Int
+  nodeId         Int
+  triggerType    EscalationTrigger
+  condition      Json?
+  /// 目标部门解析：默认直接上级；越级能力默认关闭
+  targetDeptRule TargetDeptRule   @default(DIRECT_PARENT)
+  targetValue    Json?
+  /// 上级处理超时小时数
+  timeout        Int              @default(48)
+  autoApprove    Boolean          @default(false)
+  /// 上报时是否冻结原流程（已确认：冻结）
+  freezeSource   Boolean          @default(true)
+  maxLevel       Int              @default(5)
+  acceptMode     EscalationAcceptMode @default(AUTO)
+  onMissingWorkNo WorkNoMissingPolicy @default(ESCALATE_UP)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  node WorkflowNode @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  @@index([nodeId, triggerType])
+  @@map("node_escalation_rules")
+}
+
+// ============================================================
+// 流程实例与投票
+// ============================================================
+
+model WorkflowInstance {
+  id                Int            @id @default(autoincrement())
+  tenantId          Int
+  code              String         @db.VarChar(32)
+  templateId        Int
+  templateVersionId Int
+  initiatorId       Int
+  title             String         @db.VarChar(200)
+  summary           String?        @db.VarChar(500)
+  formData          Json           @default("{}")
+  status            InstanceStatus @default(DRAFT)
+  currentNodeId     Int?
+  layerIndex        Int            @default(0)
+  priority          TaskPriority   @default(NORMAL)
+  /// 冻结前状态（上报挂起时记录，解冻时恢复）
+  suspendedFrom     InstanceStatus?
+  startedAt         DateTime?      @db.Timestamptz(3)
+  endedAt           DateTime?      @db.Timestamptz(3)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  tenant   Tenant          @relation(fields: [tenantId], references: [id])
+  template WorkflowTemplate @relation(fields: [templateId], references: [id])
+  version  WorkflowVersion @relation(fields: [templateVersionId], references: [id])
+  nodes    InstanceNode[]
+  tasks    Task[]
+  escalations Escalation[]
+  suspensions InstanceSuspension[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, status, startedAt])
+  @@index([tenantId, initiatorId, status])
+  @@map("workflow_instances")
+}
+
+model InstanceNode {
+  id                Int                @id @default(autoincrement())
+  tenantId          Int
+  instanceId        Int
+  nodeId            Int
+  type              WorkflowNodeType
+  status            InstanceNodeStatus @default(PENDING)
+  layerIndex        Int                @default(0)
+  /// 同层重投轮次
+  round             Int                @default(1)
+  startedAt         DateTime?          @db.Timestamptz(3)
+  endedAt           DateTime?          @db.Timestamptz(3)
+  deadline          DateTime?          @db.Timestamptz(3)
+  result            Json?
+  /// 上报投票节点回指该次上报
+  escalationId      Int?
+  conclusionStatus  ConclusionStatus   @default(NOT_REQUIRED)
+  conclusionDeadline DateTime?         @db.Timestamptz(3)
+  /// 否决锁定：已命中否决规则，拟判定为驳回
+  vetoLocked        Boolean            @default(false)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  instance   WorkflowInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  node       WorkflowNode     @relation(fields: [nodeId], references: [id])
+  voters     InstanceNodeVoter[]
+  votes      Vote[]
+  voteResult VoteResult?
+  conclusions VoteConclusion[]
+  tasks      Task[]
+
+  @@unique([instanceId, nodeId, round])
+  @@index([tenantId, status, deadline])
+  @@map("instance_nodes")
+}
+
+model InstanceNodeVoter {
+  id               Int          @id @default(autoincrement())
+  tenantId         Int
+  instanceNodeId   Int
+  userId           Int
+  weight           Decimal      @default(1) @db.Decimal(10, 4)
+  status           VoterStatus  @default(PENDING)
+  votedAt          DateTime?    @db.Timestamptz(3)
+  /// 审计：为什么这个人是投票人
+  sourceRuleId     Int?
+  sourceReason     String?      @db.VarChar(255)
+  delegateFromUserId Int?
+  remindedAt       DateTime?    @db.Timestamptz(3)
+  remindCount      Int          @default(0)
+  /// 缺席标记：被排除出投票池（不算票）
+  absentAt         DateTime?    @db.Timestamptz(3)
+  absentById       Int?
+  absentReason     String?      @db.VarChar(500)
+  absentSource     AbsenceSource?
+  excludedWeight   Decimal?     @db.Decimal(10, 4)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  instanceNode InstanceNode @relation(fields: [instanceNodeId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id])
+
+  @@unique([instanceNodeId, userId])
+  @@index([instanceNodeId, status])
+  @@index([tenantId, userId, status])
+  @@map("instance_node_voters")
+}
+
+/// 票：只 INSERT 不 UPDATE；改票 = 新增行 + 旧行 isReplaced=true
+model Vote {
+  id             Int          @id @default(autoincrement())
+  tenantId       Int
+  instanceNodeId Int
+  voterId        Int
+  decision       VoteDecision
+  comment        String?      @db.Text
+  weight         Decimal      @default(1) @db.Decimal(10, 4)
+  revoteSeq      Int          @default(1)
+  isReplaced     Boolean      @default(false)
+  replacedById   Int?
+  delegateFromUserId Int?
+  ip             String?      @db.VarChar(64)
+  ua             String?      @db.VarChar(512)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  instanceNode InstanceNode @relation(fields: [instanceNodeId], references: [id], onDelete: Cascade)
+  voter        User         @relation(fields: [voterId], references: [id])
+
+  @@unique([instanceNodeId, voterId, revoteSeq])
+  @@index([instanceNodeId, isReplaced])
+  @@map("votes")
+}
+
+model VoteResult {
+  id             Int     @id @default(autoincrement())
+  tenantId       Int
+  instanceNodeId Int     @unique
+  approveCount   Int     @default(0)
+  rejectCount    Int     @default(0)
+  abstainCount   Int     @default(0)
+  weightedScore  Decimal @default(0) @db.Decimal(12, 4)
+  denominator    Int     @default(0)
+  /// 系统拟判定（人工结论确认或改判后才成为最终结论）
+  passed         Boolean @default(false)
+  isProvisional  Boolean @default(true)
+  snapshot       Json
+  ruleSnapshot   Json?
+  tieResolvedBy  String? @db.VarChar(32)
+  decidedBy      Int?
+  decidedAt      DateTime? @db.Timestamptz(3)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  instanceNode InstanceNode @relation(fields: [instanceNodeId], references: [id], onDelete: Cascade)
+
+  @@map("vote_results")
+}
+
+/// 人工投票结论：每层每人必须表态后，由指定人填写
+model VoteConclusion {
+  id             Int                @id @default(autoincrement())
+  tenantId       Int
+  instanceNodeId Int
+  round          Int                @default(1)
+  authorId       Int?
+  decision       ConclusionDecision
+  systemDecision ConclusionDecision
+  isOverride     Boolean            @default(false)
+  overrideReason String?            @db.VarChar(2000)
+  content        String             @db.Text
+  attachments    Json               @default("[]")
+  /// NULL 表示系统代填（上级终审回写）
+  source         String             @default("MANUAL") @db.VarChar(32)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  instanceNode InstanceNode @relation(fields: [instanceNodeId], references: [id], onDelete: Cascade)
+  author       User?        @relation(fields: [authorId], references: [id])
+
+  @@unique([instanceNodeId, round])
+  @@index([tenantId, authorId, createdAt])
+  @@map("vote_conclusions")
+}
+
+/// 上报冻结时记录冻结前状态，便于精确恢复
+model InstanceSuspension {
+  id            Int      @id @default(autoincrement())
+  tenantId      Int
+  instanceId    Int
+  escalationId  Int?
+  frozenStatus  InstanceStatus
+  frozenNodeId  Int?
+  suspendedAt   DateTime @default(now()) @db.Timestamptz(3)
+  resumedAt     DateTime? @db.Timestamptz(3)
+  resumeAction  String?  @db.VarChar(64)
+
+  instance WorkflowInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+
+  @@index([instanceId, resumedAt])
+  @@map("instance_suspensions")
+}
+
+// ============================================================
+// 任务
+// ============================================================
+
+model Task {
+  id             Int          @id @default(autoincrement())
+  tenantId       Int
+  code           String       @db.VarChar(32)
+  instanceId     Int?
+  instanceNodeId Int?
+  parentTaskId   Int?
+  title          String       @db.VarChar(200)
+  description    String?      @db.Text
+  status         TaskStatus   @default(PENDING_ASSIGN)
+  priority       TaskPriority @default(NORMAL)
+  creatorId      Int
+  dueAt          DateTime?    @db.Timestamptz(3)
+  startedAt      DateTime?    @db.Timestamptz(3)
+  completedAt    DateTime?    @db.Timestamptz(3)
+  blockedReason  String?      @db.VarChar(500)
+  progress       Int          @default(0)
+  overdueNotifiedAt DateTime? @db.Timestamptz(3)
+  /// 上级派发的整改任务回指该次上报
+  sourceEscalationId Int?
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  instance     WorkflowInstance? @relation(fields: [instanceId], references: [id])
+  instanceNode InstanceNode?     @relation(fields: [instanceNodeId], references: [id])
+  parentTask   Task?             @relation("TaskTree", fields: [parentTaskId], references: [id])
+  subTasks     Task[]            @relation("TaskTree")
+  creator      User              @relation("TaskCreator", fields: [creatorId], references: [id])
+  assignees    TaskAssignee[]
+  checklists   TaskChecklist[]
+  dependencies TaskDependency[]  @relation("TaskDepends")
+  dependents   TaskDependency[]  @relation("TaskDependedBy")
+  logs         TaskLog[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, status, dueAt])
+  @@index([instanceId])
+  @@map("tasks")
+}
+
+/// 每任务恰好一个 OWNER + 恰好一个 ACCEPTOR（服务层 + 部分唯一索引保证）
+model TaskAssignee {
+  id         Int              @id @default(autoincrement())
+  tenantId   Int
+  taskId     Int
+  userId     Int
+  role       TaskAssigneeRole
+  weight     Decimal          @default(1) @db.Decimal(10, 4)
+  isActive   Boolean          @default(true)
+  assignedBy Int?
+  assignedAt DateTime         @default(now()) @db.Timestamptz(3)
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([taskId, userId, role])
+  @@index([userId, isActive])
+  @@map("task_assignees")
+}
+
+model TaskDependency {
+  id              Int                @id @default(autoincrement())
+  taskId          Int
+  dependsOnTaskId Int
+  type            TaskDependencyType @default(FINISH_TO_START)
+
+  task          Task @relation("TaskDepends", fields: [taskId], references: [id], onDelete: Cascade)
+  dependsOnTask Task @relation("TaskDependedBy", fields: [dependsOnTaskId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, dependsOnTaskId])
+  @@index([dependsOnTaskId])
+  @@map("task_dependencies")
+}
+
+model TaskChecklist {
+  id      Int     @id @default(autoincrement())
+  taskId  Int
+  content String  @db.VarChar(200)
+  done    Boolean @default(false)
+  order   Int     @default(0)
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, order])
+  @@map("task_checklists")
+}
+
+model TaskLog {
+  id         Int          @id @default(autoincrement())
+  tenantId   Int
+  taskId     Int
+  actorId    Int
+  action     String       @db.VarChar(64)
+  fromStatus TaskStatus?
+  toStatus   TaskStatus?
+  payload    Json?
+  createdAt  DateTime     @default(now()) @db.Timestamptz(3)
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, createdAt])
+  @@map("task_logs")
+}
+
+// ============================================================
+// 上报（上报 = 让上级部门再跑一次同样的投票）
+// ============================================================
+
+model Escalation {
+  id          Int                  @id @default(autoincrement())
+  tenantId    Int
+  code        String               @db.VarChar(32)
+  sourceType  EscalationSourceType
+  sourceId    Int
+  instanceId  Int?
+  taskId      Int?
+  fromDeptId  Int
+  toDeptId    Int
+  fromWorkNo  String?              @db.VarChar(64)
+  /// 目标工号快照：事后调整工号不影响历史链路
+  toWorkNo    String?              @db.VarChar(64)
+  reason      String               @db.Text
+  status      EscalationStatus     @default(PENDING)
+  level       Int                  @default(1)
+  triggerType EscalationTrigger    @default(MANUAL)
+  targetRule  TargetDeptRule       @default(DIRECT_PARENT)
+  requestedBy Int
+  handledBy   Int?
+  handledAt   DateTime?            @db.Timestamptz(3)
+  deadline    DateTime?            @db.Timestamptz(3)
+  frozenInstanceStatus InstanceStatus?
+  maxLevel    Int                  @default(5)
+  /// 上级投票节点：复用 InstanceNode，不新建投票体系
+  upwardInstanceNodeId Int?
+  upwardVoteRound      Int         @default(1)
+  /// 最终意见正文（回写原流程）
+  finalOpinion String?             @db.Text
+  writeBackAction WriteBackAction?
+  result      String?              @db.VarChar(64)
+  comment     String?              @db.Text
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  instance   WorkflowInstance? @relation(fields: [instanceId], references: [id])
+  requester  User              @relation("EscalationRequester", fields: [requestedBy], references: [id])
+  handler    User?             @relation("EscalationHandler", fields: [handledBy], references: [id])
+  chains     EscalationChain[]
+  records    EscalationRecord[]
+
+  @@index([tenantId, toWorkNo, status])
+  @@index([toDeptId, status])
+  @@index([instanceId])
+  @@index([tenantId, status, createdAt])
+  @@map("escalations")
+}
+
+model EscalationChain {
+  id           Int              @id @default(autoincrement())
+  tenantId     Int
+  escalationId Int
+  level        Int
+  deptId       Int
+  workNo       String?          @db.VarChar(64)
+  handlerId    Int?
+  /// 该级对应的上级投票节点
+  instanceNodeId Int?
+  status       EscalationStatus @default(PENDING)
+  actionType   EscalationAction?
+  comment      String?          @db.Text
+  enteredAt    DateTime         @default(now()) @db.Timestamptz(3)
+  deadline     DateTime?        @db.Timestamptz(3)
+  handledAt    DateTime?        @db.Timestamptz(3)
+
+  escalation Escalation @relation(fields: [escalationId], references: [id], onDelete: Cascade)
+
+  @@unique([escalationId, level])
+  @@index([tenantId, workNo, status])
+  @@map("escalation_chains")
+}
+
+model EscalationRecord {
+  id           Int      @id @default(autoincrement())
+  tenantId     Int
+  escalationId Int
+  actorId      Int
+  action       EscalationAction
+  fromStatus   EscalationStatus?
+  toStatus     EscalationStatus?
+  comment      String?  @db.Text
+  attachments  Json     @default("[]")
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+
+  escalation Escalation @relation(fields: [escalationId], references: [id], onDelete: Cascade)
+
+  @@index([escalationId, createdAt])
+  @@map("escalation_records")
+}
+
+// ============================================================
+// 通用与平台
+// ============================================================
+
+model Comment {
+  id         Int      @id @default(autoincrement())
+  tenantId   Int
+  targetType String   @db.VarChar(32)
+  targetId   Int
+  authorId   Int
+  content    String   @db.Text
+  parentId   Int?
+  mentions   Json     @default("[]")
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([targetType, targetId, createdAt])
+  @@map("comments")
+}
+
+model Attachment {
+  id            Int           @id @default(autoincrement())
+  tenantId      Int
+  targetType    String        @db.VarChar(32)
+  targetId      Int
+  fileName      String        @db.VarChar(255)
+  fileKey       String        @unique @db.VarChar(512)
+  size          Int
+  mime          String        @db.VarChar(128)
+  uploaderId    Int
+  storageDriver StorageDriver @default(local)
+  checksum      String?       @db.VarChar(128)
+  status        String        @default("READY") @db.VarChar(16)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([targetType, targetId])
+  @@map("attachments")
+}
+
+model Notification {
+  id        Int              @id @default(autoincrement())
+  tenantId  Int
+  userId    Int
+  type      NotificationType
+  title     String           @db.VarChar(200)
+  content   String?          @db.Text
+  link      String?          @db.VarChar(512)
+  level     String           @default("INFO") @db.VarChar(16)
+  channel   String           @default("INAPP") @db.VarChar(16)
+  read      Boolean          @default(false)
+  readAt    DateTime?        @db.Timestamptz(3)
+  payload   Json?
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read, createdAt])
+  @@index([tenantId, type])
+  @@map("notifications")
+}
+
+/// 审计日志：全量写操作 before/after；按月分区（迁移 SQL 中处理）
+model AuditLog {
+  id         BigInt   @id @default(autoincrement())
+  tenantId   Int
+  actorId    Int?
+  action     String   @db.VarChar(64)
+  targetType String   @db.VarChar(32)
+  targetId   String   @db.VarChar(64)
+  before     Json?
+  after      Json?
+  ip         String?  @db.VarChar(64)
+  ua         String?  @db.VarChar(512)
+  traceId    String?  @db.VarChar(64)
+  result     String   @default("SUCCESS") @db.VarChar(16)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  actor User? @relation(fields: [actorId], references: [id])
+
+  @@index([tenantId, targetType, targetId, createdAt])
+  @@index([tenantId, actorId, createdAt])
+  @@map("audit_logs")
+}
+
+/// 事务性发件箱：状态变更与事件投递同事务
+model OutboxEvent {
+  id            BigInt       @id @default(autoincrement())
+  tenantId      Int
+  eventType     String       @db.VarChar(64)
+  aggregateType String       @db.VarChar(32)
+  aggregateId   String       @db.VarChar(64)
+  sequence      Int          @default(0)
+  payload       Json
+  status        OutboxStatus @default(PENDING)
+  retries       Int          @default(0)
+  availableAt   DateTime     @default(now()) @db.Timestamptz(3)
+  lockedAt      DateTime?    @db.Timestamptz(3)
+  lastError     String?      @db.Text
+  processedAt   DateTime?    @db.Timestamptz(3)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([status, availableAt])
+  @@index([aggregateType, aggregateId, sequence])
+  @@map("outbox_events")
+}
+
+/// 缺席区间登记：节点开启时命中区间自动把人标为 ABSENT
+model Absence {
+  id        Int           @id @default(autoincrement())
+  tenantId  Int
+  userId    Int
+  startAt   DateTime      @db.Timestamptz(3)
+  endAt     DateTime      @db.Timestamptz(3)
+  reason    String?       @db.VarChar(500)
+  source    AbsenceSource @default(MANUAL)
+  createdBy Int?
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([tenantId, userId, startAt, endAt])
+  @@map("absences")
+}
+
+/// 委托投票：受托人代表委托人表态，仍计入投票池
+model Delegation {
+  id         Int      @id @default(autoincrement())
+  tenantId   Int
+  fromUserId Int
+  toUserId   Int
+  startAt    DateTime @db.Timestamptz(3)
+  endAt      DateTime @db.Timestamptz(3)
+  scopeType  ScopeType @default(SELF)
+  scopeId    Int?
+  reason     String?  @db.VarChar(500)
+  status     String   @default("ACTIVE") @db.VarChar(16)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([tenantId, fromUserId, status])
+  @@index([tenantId, toUserId, status])
+  @@map("delegations")
+}
+
+/// 单号序列：实例号/任务号/上报号按租户按期间递增
+model NumberSequence {
+  id        Int    @id @default(autoincrement())
+  tenantId  Int
+  type      String @db.VarChar(32)
+  period    String @db.VarChar(16)
+  nextValue Int    @default(1)
+
+  @@unique([tenantId, type, period])
+  @@map("number_sequences")
+}
+
+/// 幂等键：客户端重试与队列重复消费去重
+model IdempotencyKey {
+  id           BigInt   @id @default(autoincrement())
+  tenantId     Int
+  scope        String   @db.VarChar(64)
+  key          String   @db.VarChar(128)
+  responseHash String?  @db.VarChar(128)
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+
+  @@unique([tenantId, scope, key])
+  @@index([createdAt])
+  @@map("idempotency_keys")
+}
+
+model WebhookSubscription {
+  id           Int      @id @default(autoincrement())
+  tenantId     Int
+  name         String   @db.VarChar(128)
+  eventTypes   Json     @default("[]")
+  url          String   @db.VarChar(512)
+  secret       String?  @db.VarChar(255)
+  enabled      Boolean  @default(true)
+  failureCount Int      @default(0)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  @@index([tenantId, enabled])
+  @@map("webhook_subscriptions")
+}

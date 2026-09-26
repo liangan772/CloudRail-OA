@@ -1,0 +1,69 @@
+/** 统一错误码：{ code, httpStatus, message } */
+export interface ErrorDef {
+  code: string;
+  httpStatus: number;
+  message: string;
+}
+
+const E = (code: string, httpStatus: number, message: string): ErrorDef => ({ code, httpStatus, message });
+
+export const ERROR_CODES = {
+  // AUTH_*
+  AUTH_INVALID_CREDENTIALS: E('AUTH_INVALID_CREDENTIALS', 401, '账号或密码错误'),
+  AUTH_TOKEN_EXPIRED: E('AUTH_TOKEN_EXPIRED', 401, '登录已过期，请重新登录'),
+  AUTH_TOKEN_INVALID: E('AUTH_TOKEN_INVALID', 401, '登录凭证无效'),
+  AUTH_REFRESH_REVOKED: E('AUTH_REFRESH_REVOKED', 401, '刷新令牌已失效'),
+  AUTH_ACCOUNT_LOCKED: E('AUTH_ACCOUNT_LOCKED', 423, '账号已锁定，请联系管理员'),
+  AUTH_ACCOUNT_DISABLED: E('AUTH_ACCOUNT_DISABLED', 403, '账号已停用'),
+  // PERM_*
+  PERM_DENIED: E('PERM_DENIED', 403, '无操作权限'),
+  PERM_OUT_OF_SCOPE: E('PERM_OUT_OF_SCOPE', 404, '数据不存在或不在你的数据范围内'),
+  PERM_TENANT_MISMATCH: E('PERM_TENANT_MISMATCH', 403, '租户不匹配'),
+  // VOTE_*
+  VOTE_NOT_VOTER: E('VOTE_NOT_VOTER', 403, '你不在本层投票人名单内'),
+  VOTE_CLOSED: E('VOTE_CLOSED', 409, '本层已形成结论，不能再投票或改票'),
+  VOTE_EXPIRED: E('VOTE_EXPIRED', 409, '已超过投票截止时间'),
+  VOTE_ABSTAIN_NOT_ALLOWED: E('VOTE_ABSTAIN_NOT_ALLOWED', 400, '本层要求必须表态，不允许弃权'),
+  VOTE_ABSENT: E('VOTE_ABSENT', 409, '你已被标记缺席，不计入本次投票'),
+  VOTE_REVOTE_NOT_ALLOWED: E('VOTE_REVOTE_NOT_ALLOWED', 409, '本层不允许改票'),
+  VOTE_QUORUM_NOT_MET: E('VOTE_QUORUM_NOT_MET', 409, '池内人数未达法定人数，本层不得通过'),
+  VOTE_CONCLUSION_AUTHOR_REQUIRED: E('VOTE_CONCLUSION_AUTHOR_REQUIRED', 403, '你不是本层结论填写人'),
+  VOTE_CONCLUSION_REASON_REQUIRED: E('VOTE_CONCLUSION_REASON_REQUIRED', 400, '改判系统判定必须填写理由'),
+  // NODE_*
+  NODE_INVALID_TRANSITION: E('NODE_INVALID_TRANSITION', 409, '当前节点状态不允许该操作'),
+  NODE_VOTER_EMPTY: E('NODE_VOTER_EMPTY', 422, '投票人解析结果为空，请检查投票人规则'),
+  NODE_DEADLINE_PASSED: E('NODE_DEADLINE_PASSED', 409, '节点已超时'),
+  // TASK_*
+  TASK_NOT_ASSIGNEE: E('TASK_NOT_ASSIGNEE', 403, '你不是该任务的负责人或验收人'),
+  TASK_INVALID_TRANSITION: E('TASK_INVALID_TRANSITION', 409, '当前任务状态不允许该操作'),
+  TASK_BLOCKED_BY_DEPENDENCY: E('TASK_BLOCKED_BY_DEPENDENCY', 409, '存在未完成的前置任务'),
+  TASK_CHECKLIST_INCOMPLETE: E('TASK_CHECKLIST_INCOMPLETE', 400, '检查项未全部完成'),
+  TASK_ACCEPTOR_REQUIRED: E('TASK_ACCEPTOR_REQUIRED', 422, '任务必须指定唯一验收人'),
+  TASK_OWNER_REQUIRED: E('TASK_OWNER_REQUIRED', 422, '任务必须指定唯一负责人'),
+  // ESC_*
+  ESC_WORKNO_MISSING: E('ESC_WORKNO_MISSING', 422, '上级部门未配置部门工号'),
+  ESC_CROSS_LEVEL_FORBIDDEN: E('ESC_CROSS_LEVEL_FORBIDDEN', 403, '已禁止越级上报'),
+  ESC_MAX_LEVEL_REACHED: E('ESC_MAX_LEVEL_REACHED', 409, '已达最高上报层级'),
+  ESC_ALREADY_SIGNED: E('ESC_ALREADY_SIGNED', 409, '该上报已被其他工号成员签收'),
+  ESC_INVALID_TRANSITION: E('ESC_INVALID_TRANSITION', 409, '当前上报状态不允许该操作'),
+  // RULE_*
+  RULE_INVALID: E('RULE_INVALID', 422, '规则不合法'),
+  RULE_UNKNOWN_OP: E('RULE_UNKNOWN_OP', 422, '规则包含未知操作符'),
+  RULE_PATH_FORBIDDEN: E('RULE_PATH_FORBIDDEN', 422, '规则引用了不允许的上下文字段'),
+  RULE_DEPTH_EXCEEDED: E('RULE_DEPTH_EXCEEDED', 422, '规则嵌套过深'),
+  // WORKFLOW_* / SYS_*
+  WF_VERSION_NOT_PUBLISHED: E('WF_VERSION_NOT_PUBLISHED', 422, '模板版本未发布，不能用于发起'),
+  WF_NODE_GRAPH_INVALID: E('WF_NODE_GRAPH_INVALID', 422, '节点图不合法（存在孤立节点或缺少结束节点）'),
+  WF_FORM_SCHEMA_INVALID: E('WF_FORM_SCHEMA_INVALID', 400, '表单数据未通过校验'),
+  SYS_INTERNAL_ERROR: E('SYS_INTERNAL_ERROR', 500, '服务器内部错误'),
+  SYS_NOT_FOUND: E('SYS_NOT_FOUND', 404, '资源不存在'),
+  SYS_VALIDATION_FAILED: E('SYS_VALIDATION_FAILED', 400, '参数校验失败'),
+  SYS_RATE_LIMITED: E('SYS_RATE_LIMITED', 429, '请求过于频繁，请稍后重试'),
+  SYS_IDEMPOTENT_REPLAY: E('SYS_IDEMPOTENT_REPLAY', 200, '重复请求已忽略'),
+} as const;
+
+export type ErrorCode = keyof typeof ERROR_CODES;
+
+export function errorDef(code: ErrorCode): ErrorDef {
+  return ERROR_CODES[code];
+}
