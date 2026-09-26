@@ -408,6 +408,12 @@ export class InstanceService {
           stated: node.voters.filter((v) => v.status === 'VOTED' || v.status === 'DELEGATED').length,
           absent: node.voters.filter((v) => v.status === 'ABSENT').length,
         },
+        /**
+         * 命中上报规则但上报单尚未创建时的命中依据（阶段 3 建单后此字段会被正式的上报记录取代）。
+         * 放在节点上而不是实例上，是为了与"实例状态暂不改变"保持一致。
+         */
+        pendingEscalation:
+          (node.result as { escalationPending?: unknown } | null)?.escalationPending ?? null,
       })),
       escalations: instance.escalations,
       startedAt: instance.startedAt,

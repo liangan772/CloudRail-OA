@@ -94,6 +94,13 @@ export class ConclusionService {
       // 节点落到 PASSED / REJECTED 后由推进服务决定开下一层还是给流程定局
       const advanced = await this.advance.advance(tx, ctx, user, built.nodeStatus);
 
+      // 本层通过后应派的任务数：任务实体由阶段 3 的 TaskEngine 创建，
+      // 这里只如实报告"有几条待派"，不落半成品任务（避免没有 OWNER/ACCEPTOR 的脏数据）
+      const pendingTaskTemplates =
+        built.nodeStatus === 'PASSED'
+          ? await tx.nodeTaskTemplate.count({ where: { nodeId: ctx.node.nodeId, triggerOn: 'PASS' } })
+          : 0;
+
       return {
         instanceId,
         nodeId: ctx.node.id,
@@ -104,6 +111,7 @@ export class ConclusionService {
         conclusion: built.conclusion,
         isOverride: built.isOverride,
         summary: advanced.summary,
+        pendingTaskTemplates,
       };
     });
   }

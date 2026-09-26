@@ -394,14 +394,14 @@ export class VoteService {
           },
         });
 
-        if (ctx.instance.status === 'VOTING') {
-          const escalated = transitionInstance({ status: 'VOTING', escalationTriggered: true }, 'ESCALATE');
-          if (!escalated.ok) throw AppError.fromDef(escalated.error, escalated.reason);
-          await tx.workflowInstance.update({
-            where: { id: ctx.instance.id },
-            data: { status: escalated.status },
-          });
-        }
+        /**
+         * 只把**节点**标成 ESCALATED，实例状态先不动。
+         *
+         * 实例转 ESCALATED 的语义是"流程正在上报中"，而 `Escalation` 实体、流程冻结与通知
+         * 要到阶段 3 的 EscalationEngine 才落地。提前改实例状态会造出"实例说在上报、
+         * 却查不到上报单"的中间态；命中依据已写进 `node.result.escalationPending`，
+         * 阶段 3 建单时接上即可（届时这里换成 ESCALATE 事件 + 建单 + 冻结）。
+         */
 
         return {
           nodeStatus: transition.status as string,
@@ -417,7 +417,7 @@ export class VoteService {
           },
           systemDecision: tally.systemDecision,
           appliedEvents: ['ESCALATE'],
-          reason: `命中上报规则：${triggers
+          reason: `命中上报规则，本层待上报：${triggers
             .map((trigger) => `${trigger.triggerLabel}（${trigger.reason}）`)
             .join('；')}`,
           escalation: { matched: escalationResult.matched, errors: escalationResult.errors },
@@ -495,16 +495,10 @@ export class VoteService {
       },
     });
 
-    // 因法定人数不足上报：节点与实例同步进入 ESCALATED
-    // （Escalation 实体、冻结与通知在阶段 3 的 EscalationEngine 落地）
-    if (status === 'ESCALATED' && ctx.instance.status === 'VOTING') {
-      const escalated = transitionInstance({ status: 'VOTING', escalationTriggered: true }, 'ESCALATE');
-      if (!escalated.ok) throw AppError.fromDef(escalated.error, escalated.reason);
-      await tx.workflowInstance.update({
-        where: { id: ctx.instance.id },
-        data: { status: escalated.status },
-      });
-    }
+    /**
+     * 因法定人数不足上报时同样**只标节点**，实例状态留给阶段 3 的 EscalationEngine：
+     * 它建出 Escalation 单、写冻结记录、通知上级工号之后再改实例状态，语义才完整。
+     */
 
     return {
       nodeStatus: status,

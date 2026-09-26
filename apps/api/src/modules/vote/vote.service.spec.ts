@@ -327,6 +327,7 @@ describe('投票闭环 · 上报规则接线', () => {
     expect(result.appliedEvents).toEqual(['ESCALATE']);
     expect(result.nodeStatus).toBe('ESCALATED');
     expect(result.reason).toContain('命中上报规则');
+    expect(result.reason).toContain('待上报');
     expect(result.reason).toContain('金额/风险超限');
     // 关键：不能既出结论又上报
     expect(state.voteResult).toBeNull();
@@ -340,8 +341,10 @@ describe('投票闭环 · 上报规则接线', () => {
         }),
       }),
     );
-    // 实例同步进入上报中
-    expect(state.instanceStatus).toBe('ESCALATED');
+    // 实例状态先不动（上报单与冻结由阶段 3 的 EscalationEngine 负责建），
+    // 避免出现"实例说在上报、却查不到上报单"的中间态
+    expect(state.instanceStatus).toBe('VOTING');
+    expect(tx.workflowInstance.update).not.toHaveBeenCalled();
   });
 
   it('未命中时把规则自身的错误带出去（脏规则不静默消失）', async () => {

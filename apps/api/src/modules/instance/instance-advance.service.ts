@@ -42,27 +42,25 @@ export class InstanceAdvanceService {
     );
     if (!transition.ok) throw AppError.fromDef(transition.error, transition.reason);
 
-    let instanceStatus = transition.status;
+    const instanceStatus = transition.status;
     const finalStatus = transition.status;
+    const settled = instanceStatus === 'APPROVED' || instanceStatus === 'REJECTED';
 
-    // 已确认规则 C2：最后一层通过 → APPROVED、任一层驳回 → REJECTED，随后归档关闭
-    if (instanceStatus === 'APPROVED' || instanceStatus === 'REJECTED') {
-      const close = transitionInstance({ status: instanceStatus as never }, 'CLOSE');
-      if (!close.ok) throw AppError.fromDef(close.error, close.reason);
-      instanceStatus = close.status;
-      await tx.workflowInstance.update({
-        where: { id: ctx.instance.id },
-        data: { status: close.status as never, endedAt: new Date() },
-      });
-    } else {
-      await tx.workflowInstance.update({
-        where: { id: ctx.instance.id },
-        data: {
-          status: instanceStatus as never,
-          ...(nextNode ? { currentNodeId: nextNode.id, layerIndex: nextNode.layerIndex } : {}),
-        },
-      });
-    }
+    /**
+     * 定局后**停留在 APPROVED / REJECTED**，不再同事务直接归档。
+     *
+     * 原因：刚通过就变成 CLOSED，前端与发起人都看不到"已通过"这个结果态，
+     * 排障时也只能靠最后一个节点反推。归档（CLOSE → CLOSED）保留为后续显式动作或
+     * 归档任务触发，状态机里这条路径依然可用（`allowedInstanceEvents('APPROVED') === ['CLOSE']`）。
+     */
+    await tx.workflowInstance.update({
+      where: { id: ctx.instance.id },
+      data: {
+        status: instanceStatus as never,
+        ...(settled ? { endedAt: new Date() } : {}),
+        ...(nextNode ? { currentNodeId: nextNode.id, layerIndex: nextNode.layerIndex } : {}),
+      },
+    });
 
     return {
       instanceStatus,
@@ -70,7 +68,7 @@ export class InstanceAdvanceService {
       nextNode,
       summary: hasNextLayer
         ? '本层通过，已开启下一层投票'
-        : `本层${finalStatus === 'APPROVED' ? '通过' : '驳回'}，流程已归档`,
+        : `本层${finalStatus === 'APPROVED' ? '通过' : '驳回'}，流程已${finalStatus === 'APPROVED' ? '通过' : '驳回'}（待归档）`,
     };
   }
 

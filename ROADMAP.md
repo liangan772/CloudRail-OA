@@ -36,6 +36,14 @@
 | 5 | 前端业务：工作台、投票中心、流程详情、任务中心、上报中心、流程设计器、统计 | 全部业务页面可交互 | ⏸ 未开始 |
 | 6 | 简化部署、联调、测试、文档、验收 | `docker-compose.dev/prod.yml`、启动与备份脚本、联调文档、验收清单 | ⏸ 未开始 |
 
+### 阶段 2 结束时确认的三个口径（2026-09-26）
+
+| # | 决策 | 现状与后续 |
+| --- | --- | --- |
+| 1 | 流程定局后**停留**在 `APPROVED` / `REJECTED`，不自动归档 | `endedAt` 已写；`CLOSE → CLOSED` 保留给显式动作或归档任务（状态机路径仍在，`allowedInstanceEvents('APPROVED') === ['CLOSE']`） |
+| 2 | 命中上报规则时**只把节点标为 `ESCALATED`，实例状态不动** | 命中依据写进 `InstanceNode.result.escalationPending`，并在流程详情里以 `pendingEscalation` 暴露；阶段 3 的 EscalationEngine 建出上报单、写冻结记录后再改实例状态，避免"实例说在上报、却查不到上报单" |
+| 3 | 通过后**不落占位任务** | 结论接口返回 `pendingTaskTemplates`（本层待派条数）；任务实体由阶段 3 的 TaskEngine 统一创建，避免产生没有 OWNER / ACCEPTOR 的脏数据 |
+
 对应用户要求的 14 项输出物的映射：
 
 | 输出要求 | 归属阶段 |
