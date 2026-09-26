@@ -18,6 +18,7 @@ import { transitionInstance, transitionNode, type NodeEvent } from '../../domain
 import { NodeContextService, type NodeContext, type Tx } from './node-context.service';
 import { RuleEngineService } from '../rule/rule-engine.service';
 import type { EscalationEvaluationResult } from '../../domain/rule/rule-engine';
+import { EscalationService } from '../escalation/escalation.service';
 import type { CastVoteBody, MarkAbsentBody, RevokeAbsentBody } from './vote.dto';
 
 /** 池内已表态人数（VOTED / DELEGATED） */
@@ -31,6 +32,7 @@ export class VoteService {
     private readonly prisma: PrismaService,
     private readonly contexts: NodeContextService,
     private readonly rules: RuleEngineService,
+    private readonly escalations: EscalationService,
   ) {}
 
   /* ---------------------------- 投票 / 改票 ---------------------------- */
@@ -107,6 +109,7 @@ export class VoteService {
         appliedEvents: applied.appliedEvents,
         reason: applied.reason,
         escalation: applied.escalation,
+        escalationCreated: applied.escalationCreated ?? null,
       };
     });
   }
@@ -314,6 +317,8 @@ export class VoteService {
     appliedEvents: NodeEvent[];
     reason: string;
     escalation: { matched: EscalationEvaluationResult['matched']; errors: string[] } | null;
+    /** 命中的上报规则实际建出的上报单（由 EscalationEngine 返回） */
+    escalationCreated?: unknown;
   }> {
     const [voters, votes] = await Promise.all([
       tx.instanceNodeVoter.findMany({
@@ -410,14 +415,25 @@ export class VoteService {
           },
         });
 
-        /**
-         * 只把**节点**标成 ESCALATED，实例状态先不动。
-         *
-         * 实例转 ESCALATED 的语义是"流程正在上报中"，而 `Escalation` 实体、流程冻结与通知
-         * 要到阶段 3 的 EscalationEngine 才落地。提前改实例状态会造出"实例说在上报、
-         * 却查不到上报单"的中间态；命中依据已写进 `node.result.escalationPending`，
-         * 阶段 3 建单时接上即可（届时这里换成 ESCALATE 事件 + 建单 + 冻结）。
-         */
+        // 真正建上报单：由 EscalationEngine 解析目标工号、冻结原流程，
+        // 并按承接模式创建上级投票节点（此时实例才合法地进入 ESCALATED）
+        const primary = escalationResult.matched[0]!;
+        const created = await this.escalations.create(tx, {
+          tenantId: ctx.instance.tenantId,
+          instanceId: ctx.instance.id,
+          sourceNodeId: ctx.node.id,
+          requestedBy: user.userId,
+          triggerType: primary.triggerType,
+          reason: escalationResult.matched.map((hit) => hit.reason).join('；'),
+          rule: {
+            targetDeptRule: primary.target.targetDeptRule,
+            timeoutHours: primary.target.timeoutHours,
+            freezeSource: primary.target.freezeSource,
+            maxLevel: primary.target.maxLevel,
+            acceptMode: primary.target.acceptMode,
+            onMissingWorkNo: primary.target.onMissingWorkNo,
+          },
+        });
 
         return {
           nodeStatus: transition.status as string,
@@ -437,6 +453,7 @@ export class VoteService {
             .map((trigger) => `${trigger.triggerLabel}（${trigger.reason}）`)
             .join('；')}`,
           escalation: { matched: escalationResult.matched, errors: escalationResult.errors },
+          escalationCreated: created,
         };
       }
     }
@@ -467,6 +484,13 @@ export class VoteService {
 
     const enteredConclusion =
       appliedEvents.includes('ALL_STATED') || appliedEvents.includes('VETO_TERMINATE');
+    // 上级投票节点出结论时，把上报单一起推进到"待上级填结论"
+    if (enteredConclusion && ctx.node.escalationId != null) {
+      await tx.escalation.update({
+        where: { id: ctx.node.escalationId },
+        data: { status: 'PENDING_CONCLUSION' },
+      });
+    }
     if (enteredConclusion) {
       const plan = planConclusion(ctx.rule.conclusionMode, decision.tally);
       if (plan.ok) {

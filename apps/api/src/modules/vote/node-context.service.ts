@@ -32,6 +32,8 @@ export interface NodeContext {
     conclusionStatus: string;
     conclusionDeadline: Date | null;
     nodeKey: string;
+    /** 非空表示这是某次上报的「上级投票节点」 */
+    escalationId: number | null;
   };
   voters: { userId: number; weight: number; status: string }[];
   /** 只含最新票（isReplaced=false） */
@@ -119,6 +121,7 @@ export class NodeContextService {
         conclusionStatus: node.conclusionStatus,
         conclusionDeadline: node.conclusionDeadline,
         nodeKey: node.node.nodeKey,
+        escalationId: node.escalationId,
       },
       voters: node.voters.map((voter) => ({
         userId: voter.userId,

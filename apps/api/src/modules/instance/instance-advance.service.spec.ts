@@ -47,6 +47,7 @@ function nodeContext(): NodeContext {
       conclusionStatus: 'PENDING',
       conclusionDeadline: null,
       nodeKey: 'layer1_tech',
+      escalationId: null,
     },
     voters: [{ userId: 3, weight: 1, status: 'VOTED' }],
     votes: [{ id: 1, voterId: 3, decision: 'APPROVE', weight: 1, revoteSeq: 1 }],

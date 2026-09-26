@@ -12,12 +12,14 @@ import { transitionInstance, transitionNode, type InstanceAction, type NodeActio
 import { resolveVoters, type VoterDirectory } from '../../domain/vote/voter-resolution';
 import type { InstanceListQuery } from './instance.dto';
 import { VoterDirectoryService } from './voter-directory.service';
+import { NumberingService } from '../common/numbering.service';
 
 @Injectable()
 export class InstanceService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly directory: VoterDirectoryService,
+    private readonly numbering: NumberingService,
   ) {}
 
   private scopeOf(user: AuthenticatedUser): ScopePredicate {
@@ -123,7 +125,7 @@ export class InstanceService {
     const layerIndex = firstNode.layerIndex ?? 1;
 
     const created = await this.prisma.$transaction(async (tx) => {
-      const code = await this.nextCode(tx, user.tenantId, 'INSTANCE');
+      const code = await this.numbering.next(tx, user.tenantId, 'INSTANCE');
 
       const instance = await tx.workflowInstance.create({
         data: {
@@ -435,20 +437,6 @@ export class InstanceService {
       select: { id: true },
     });
     return { initiatorId: { in: users.map((item) => item.id) } };
-  }
-
-  /** 单号生成：`NumberSequence` 原子自增，保证单机部署下不重复 */
-  private async nextCode(tx: Prisma.TransactionClient, tenantId: number, type: string): Promise<string> {
-    const sequence = await tx.numberSequence.upsert({
-      where: { tenantId_type_period: { tenantId, type, period: 'GLOBAL' } },
-      update: { nextValue: { increment: 1 } },
-      create: { tenantId, type, period: 'GLOBAL', nextValue: 1 },
-      select: { nextValue: true },
-    });
-    const prefix = type === 'INSTANCE' ? 'OA' : type === 'TASK' ? 'TK' : 'ES';
-    const now = new Date();
-    const period = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
-    return `${prefix}-${period}-${String(sequence.nextValue).padStart(4, '0')}`;
   }
 
 }

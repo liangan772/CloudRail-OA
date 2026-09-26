@@ -8,6 +8,7 @@ import { WorkflowTemplateModule } from './modules/workflow-template/workflow-tem
 import { InstanceModule } from './modules/instance/instance.module';
 import { VoteModule } from './modules/vote/vote.module';
 import { RuleModule } from './modules/rule/rule.module';
+import { EscalationModule } from './modules/escalation/escalation.module';
 import { HealthController } from './modules/health/health.controller';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from './modules/auth/guards/permissions.guard';
@@ -24,6 +25,7 @@ import { DataScopeGuard } from './modules/auth/guards/data-scope.guard';
     InstanceModule,
     VoteModule,
     RuleModule,
+    EscalationModule,
   ],
   controllers: [HealthController],
   providers: [

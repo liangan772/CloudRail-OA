@@ -1,5 +1,6 @@
 import { InstanceService } from './instance.service';
 import { VoterDirectoryService } from './voter-directory.service';
+import { NumberingService } from '../common/numbering.service';
 import { AppError } from '../../common/errors/app-error';
 import type { AuthenticatedUser } from '../../common/context/authenticated-user';
 
@@ -124,7 +125,11 @@ function buildMocks() {
 
 /** 装配被测服务：投票人目录服务复用同一份假仓储，因此仍不触达数据库 */
 function buildService(prisma: unknown): InstanceService {
-  return new InstanceService(prisma as never, new VoterDirectoryService(prisma as never));
+  return new InstanceService(
+    prisma as never,
+    new VoterDirectoryService(prisma as never),
+    new NumberingService(prisma as never),
+  );
 }
 
 describe('实例发起 · 编排', () => {

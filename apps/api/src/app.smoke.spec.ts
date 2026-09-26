@@ -61,6 +61,13 @@ describe('应用装配冒烟（不连数据库）', () => {
     expect(res.body.code).toBe('AUTH_TOKEN_INVALID');
   });
 
+  it('阶段 3 的上报接口已注册且同样受身份守卫保护', async () => {
+    for (const path of ['/escalations', '/escalations/1']) {
+      const res = await request(app.getHttpServer()).get(path).expect(401);
+      expect(res.body.code).toBe('AUTH_TOKEN_INVALID');
+    }
+  });
+
   it('登录接口是公开的：参数不合法时返回 400 校验错误（而不是 401）', async () => {
     const res = await request(app.getHttpServer())
       .post('/auth/login')

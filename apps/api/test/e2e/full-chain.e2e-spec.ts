@@ -105,6 +105,8 @@ describe('真实库 e2e · 全链路', () => {
   let instanceId: number;
   let firstLayerVoterIds: number[] = [];
   let directory: Map<number, { email: string; name: string }>;
+  let overLimitInstanceId: number;
+  let overLimitEscalationId: number;
 
   it('登录与身份：admin 为租户管理员，数据范围为 TENANT', async () => {
     const res = await http()
@@ -286,7 +288,7 @@ describe('真实库 e2e · 全链路', () => {
     expect(final.endedAt).toBeTruthy();
   });
 
-  it('金额超限：命中上报规则 → 节点待上报、实例状态不动、命中依据可查', async () => {
+  it('金额超限：命中上报规则 → 建上报单、冻结原流程、自动开上级投票', async () => {
     const created = await http()
       .post('/instances')
       .set('Authorization', `Bearer ${await token(WANGQIANG)}`)
@@ -309,12 +311,77 @@ describe('真实库 e2e · 全链路', () => {
     // 关键：不能既出结论又上报
     expect(last.body.data.escalation.matched.length).toBeGreaterThan(0);
 
+    // 阶段 3：真的建出了上报单，并投递到上级部门工号
+    const escalationCreated = last.body.data.escalationCreated as {
+      escalationId: number;
+      code: string;
+      status: string;
+      toWorkNo: string | null;
+      frozen: boolean;
+      upwardNodeId: number | null;
+      upwardVoterCount: number;
+    };
+    expect(escalationCreated).toBeDefined();
+    expect(escalationCreated.code).toMatch(/^ES-\d{6}-\d{4}$/);
+    expect(escalationCreated.toWorkNo).toBe('D1001'); // 技术部的直接上级 = 产品中心
+    expect(escalationCreated.frozen).toBe(true);
+    expect(escalationCreated.upwardNodeId).not.toBeNull();
+    expect(escalationCreated.upwardVoterCount).toBe(3); // 产品中心工号成员 3 人
+
     const detail = await instanceDetail(overLimitId);
-    // 决策 2：节点已标待上报，但实例仍是 VOTING（上报单由阶段 3 建）
-    expect(detail.status).toBe('VOTING');
+    // 上报即冻结（C3/D7）：实例转 ESCALATED，并记录冻结前状态
+    expect(detail.status).toBe('ESCALATED');
+    expect(detail.suspendedFrom).toBe('VOTING');
     const node = (detail.nodes as Array<{ status: string; pendingEscalation: unknown }>)[0]!;
     expect(node.status).toBe('ESCALATED');
     expect(node.pendingEscalation).not.toBeNull();
+
+    // 上报单详情：逐级链路与上级投票节点都在
+    const escalationDetail = await http()
+      .get(`/escalations/${escalationCreated.escalationId}`)
+      .set('Authorization', `Bearer ${await token(ADMIN)}`)
+      .expect(200);
+    expect(escalationDetail.body.data.status).toBe('VOTING');
+    expect(escalationDetail.body.data.level).toBe(1);
+    expect(escalationDetail.body.data.fromWorkNo).toBe('D1003');
+    expect(escalationDetail.body.data.toWorkNo).toBe('D1001');
+    expect(escalationDetail.body.data.chains).toHaveLength(1);
+    expect(escalationDetail.body.data.upwardNodes[0].voters).toHaveLength(3);
+
+    overLimitInstanceId = overLimitId;
+    overLimitEscalationId = escalationCreated.escalationId;
+  });
+
+  it('上级按同样规则投票并给出结论 → 原流程解冻恢复（CONTINUE）', async () => {
+    const detail = await instanceDetail(overLimitInstanceId);
+    // 上报后当前节点已切到「上级投票节点」，投票人 = 产品中心工号成员
+    const upwardNode = (
+      detail.nodes as Array<{ layerIndex: number; status: string; voters: Array<{ userId: number }> }>
+    )
+      .slice()
+      .sort((a, b) => b.layerIndex - a.layerIndex)[0]!;
+    expect(upwardNode.voters).toHaveLength(3);
+
+    const votes = await castVotesFor(
+      overLimitInstanceId,
+      upwardNode.voters.map((voter) => voter.userId),
+      directory,
+    );
+    expect(votes.body.data.nodeStatus).toBe('PENDING_CONCLUSION');
+
+    // 上级结论：同意继续 → 解冻原流程
+    const concluded = await http()
+      .post(`/escalations/${overLimitEscalationId}/conclusion`)
+      .set('Authorization', `Bearer ${await token(LIJING)}`)
+      .send({ opinion: 'CONTINUE', content: '产品中心同意继续，按原流程执行' })
+      .expect(201);
+
+    expect(concluded.body.data.writeBackAction).toBe('CONTINUE');
+    expect(concluded.body.data.escalationStatus).toBe('CLOSED');
+    expect(concluded.body.data.instanceStatus).toBe('VOTING');
+
+    const final = await instanceDetail(overLimitInstanceId);
+    expect(final.status).toBe('VOTING');
   });
 
   it('上报规则试算接口：返回命中项与越级开关状态', async () => {

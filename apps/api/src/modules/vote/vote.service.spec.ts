@@ -159,6 +159,8 @@ function buildFake(options: { deadline?: Date; voterIds?: number[]; nodeStatus?:
 
 /** 最近一次构造用到的规则引擎替身（供用例断言"有没有真的去问规则引擎"） */
 let lastRules: { checkForNode: jest.Mock } | null = null;
+/** 最近一次构造用到的上报引擎替身（阶段 3：命中后真的建上报单） */
+let lastEscalations: { create: jest.Mock } | null = null;
 
 /** 装配被测服务；`escalation` 传入时表示规则引擎会命中上报 */
 function buildService(prisma: unknown, escalation?: { matched: unknown[]; errors: string[] }): VoteService {
@@ -170,7 +172,28 @@ function buildService(prisma: unknown, escalation?: { matched: unknown[]; errors
     ),
   };
   lastRules = rules;
-  return new VoteService(prisma as never, new NodeContextService(prisma as never), rules as never);
+  const escalations = {
+    create: jest.fn().mockResolvedValue({
+      escalationId: 77,
+      code: 'ES-202609-0001',
+      status: 'VOTING',
+      level: 1,
+      toDeptId: 2,
+      toWorkNo: 'D1001',
+      upwardNodeId: 902,
+      upwardVoterCount: 3,
+      frozen: true,
+      hops: [],
+      reason: '投递到部门 2 的工号 D1001',
+    }),
+  };
+  lastEscalations = escalations;
+  return new VoteService(
+    prisma as never,
+    new NodeContextService(prisma as never),
+    rules as never,
+    escalations as never,
+  );
 }
 
 describe('投票闭环 · 记票与自动推进', () => {
@@ -347,10 +370,19 @@ describe('投票闭环 · 上报规则接线', () => {
         }),
       }),
     );
-    // 实例状态先不动（上报单与冻结由阶段 3 的 EscalationEngine 负责建），
-    // 避免出现"实例说在上报、却查不到上报单"的中间态
-    expect(state.instanceStatus).toBe('VOTING');
+    // 阶段 3：命中后真的建上报单（解析工号 + 冻结 + 开上级投票），
+    // VoteService 不再自己直接改实例状态，交给 EscalationEngine 统一处理
+    expect(lastEscalations!.create).toHaveBeenCalledTimes(1);
+    const createArgs = lastEscalations!.create.mock.calls[0]![1] as {
+      triggerType: string;
+      sourceNodeId: number;
+      rule: { acceptMode: string };
+    };
+    expect(createArgs.triggerType).toBe('OVER_LIMIT');
+    expect(createArgs.sourceNodeId).toBe(900);
+    expect(createArgs.rule.acceptMode).toBe('AUTO');
     expect(tx.workflowInstance.update).not.toHaveBeenCalled();
+    expect(result.escalationCreated).toMatchObject({ escalationId: 77, toWorkNo: 'D1001' });
   });
 
   it('未命中时把规则自身的错误带出去（脏规则不静默消失）', async () => {
