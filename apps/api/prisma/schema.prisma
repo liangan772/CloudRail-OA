@@ -6,6 +6,9 @@
 
 generator client {
   provider = "prisma-client-js"
+  // 生产镜像用 Debian（node:20-slim），引擎要 debian-openssl-3.0.x；
+  // 本地 Windows 开发用 native。两者都生成，避免"本地能跑、镜像里引擎加载失败"。
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
 datasource db {
