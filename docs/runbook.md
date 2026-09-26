@@ -15,17 +15,23 @@ cp .env.example .env
 # 必须改：POSTGRES_PASSWORD、JWT_ACCESS_SECRET、JWT_REFRESH_SECRET（各 64 字节随机串）
 # 建议改：CORS_ORIGINS（前端域名）、DEFAULT_TENANT_CODE
 
-docker compose -f docker/docker-compose.prod.yml up -d --build
+# ⚠️ 必须显式 --env-file .env：compose 的变量替换读的是「项目目录下的 .env」，
+#    而项目目录默认是 compose 文件所在目录（docker/），不是仓库根目录
+docker compose --env-file .env -f docker/docker-compose.prod.yml up -d --build
 # 需要自动 HTTPS：
 #   OA_DOMAIN=oa.example.com ACME_EMAIL=you@example.com \
-#   docker compose -f docker/docker-compose.prod.yml --profile tls up -d
+#   docker compose --env-file .env -f docker/docker-compose.prod.yml --profile tls up -d
 
 # 首次灌种子（幂等，可重复执行）
-docker compose -f docker/docker-compose.prod.yml exec api pnpm db:seed
+docker compose --env-file .env -f docker/docker-compose.prod.yml exec api pnpm db:seed
 ```
 
 `api` 容器启动时会先跑 `prisma migrate deploy` 再起服务，所以迁移不需要手工执行。
 生产建议把 `API_BIND` / `WEB_BIND` 设成 `127.0.0.1`，只让 Caddy（或你现有的反代）对外。
+
+容器名固定，便于运维脚本与排障：`oa-api` / `oa-web` / `oa-postgres` / `oa-redis`。
+若用宝塔自带的 Nginx 做反代（这台机器上已有），可以不起 Caddy：
+域名 → `127.0.0.1:3000`，另外把 `/api` 与 `/ws` 反代到 `127.0.0.1:3001`（`/ws` 需要 upgrade 头）。
 
 ## 3. 日常检查
 

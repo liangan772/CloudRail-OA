@@ -31,17 +31,22 @@ function envValue(key, fallback) {
   return matched?.[1] ?? fallback;
 }
 
-const container = process.env.OA_PG_CONTAINER ?? 'oa-postgres-dev';
+const candidates = process.env.OA_PG_CONTAINER ? [process.env.OA_PG_CONTAINER] : ['oa-postgres', 'oa-postgres-dev'];
 const user = envValue('POSTGRES_USER', 'oa');
 const db = envValue('POSTGRES_DB', 'oa');
 const fileName = path.basename(file);
 const containerPath = `/backups/${fileName}`;
 
-const running =
-  spawnSync('docker', ['ps', '--filter', `name=${container}`, '--format', '{{.Names}}'], {
+function containerRunning(name) {
+  const result = spawnSync('docker', ['ps', '--filter', `name=${name}`, '--format', '{{.Names}}'], {
     stdio: 'pipe',
     encoding: 'utf8',
-  }).stdout?.includes(container) ?? false;
+  });
+  return result.status === 0 && (result.stdout ?? '').includes(name);
+}
+
+const container = candidates.find((name) => containerRunning(name)) ?? candidates[0];
+const running = containerRunning(container);
 
 // 备份目录挂进容器（见 compose 的 /backups），所以先确认文件在容器里可见
 if (running && !existsSync(path.join(root, 'docker', 'backups', fileName))) {

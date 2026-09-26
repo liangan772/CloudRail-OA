@@ -12,7 +12,11 @@ mkdirSync(outDir, { recursive: true });
 
 const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
 const file = `oa-${stamp}.dump`;
-const container = process.env.OA_PG_CONTAINER ?? 'oa-postgres-dev';
+// 容器名固定：生产 compose 是 oa-postgres，开发 compose 是 oa-postgres-dev。
+// 两个都试一遍，避免为了备份去记自己用的是哪个 compose。
+const candidates = process.env.OA_PG_CONTAINER
+  ? [process.env.OA_PG_CONTAINER]
+  : ['oa-postgres', 'oa-postgres-dev'];
 
 function containerRunning(name) {
   const result = spawnSync('docker', ['ps', '--filter', `name=${name}`, '--format', '{{.Names}}'], {
@@ -21,6 +25,8 @@ function containerRunning(name) {
   });
   return result.status === 0 && result.stdout.trim().includes(name);
 }
+
+const container = candidates.find((name) => containerRunning(name)) ?? candidates[0];
 
 function envValue(key, fallback) {
   if (process.env[key]) return process.env[key];

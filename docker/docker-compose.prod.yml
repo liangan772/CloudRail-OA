@@ -1,8 +1,13 @@
 # 生产：一台机器 + 一个 compose（C8）。不引入 Nginx/K8s/Prometheus。
 # HTTPS 用可选 profile（caddy）；不用 Caddy 时上层有现成反代也可以。
+#
+# ⚠️ 变量替换读的是「项目目录下的 .env」，而项目目录默认是 compose 文件所在目录（docker/）。
+# 所以启动时请显式指定：docker compose --env-file .env -f docker/docker-compose.prod.yml up -d
+# （或者在 docker/ 下再放一份 .env；容器名已固定，运维脚本按固定名字找容器）
 services:
   postgres:
     image: postgres:16-alpine
+    container_name: oa-postgres
     restart: always
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-oa}
@@ -20,6 +25,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    container_name: oa-redis
     restart: always
     command: ['redis-server', '--appendonly', 'yes']
     volumes:
@@ -31,6 +37,7 @@ services:
       retries: 10
 
   api:
+    container_name: oa-api
     build:
       context: ..
       dockerfile: apps/api/Dockerfile
@@ -61,6 +68,7 @@ services:
       - oa-uploads:/app/data/uploads
 
   web:
+    container_name: oa-web
     build:
       context: ..
       dockerfile: apps/web/Dockerfile
