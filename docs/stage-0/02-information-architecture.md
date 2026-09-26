@@ -31,16 +31,16 @@
 | # | 页面 | 路由 | 权限 | 主要区块 |
 | --- | --- | --- | --- | --- |
 | 1 | 登录 | `/login` | 公开 | 品牌区、账号密码表单、记住我、错误提示、演示账号提示（seed 后） |
-| 2 | 工作台 | `/dashboard` | 登录即可 | 8 张统计卡（见 §3.1）、待办聚合列表、最近动态时间线、负载/进度迷你图 |
+| 2 | 工作台 | `/dashboard` | 登录即可 | 9 张统计卡（原 8 张 + 新增「待我填写结论」，见 §3.1）、待办聚合列表、最近动态时间线、负载/进度迷你图 |
 | 3 | 投票中心 | `/votes` | `VOTE_READ` | 分段控件「待我投票 / 我已投票 / 全部」、投票卡片（当前层进度条 + 截止倒计时）、批量提醒 |
-| 4 | 投票详情 | `/votes/[instanceNodeId]` | `VOTE_READ` | 表单数据只读视图、同层投票人头像组与状态、投票动作区（同意/反对/弃权 + 意见）、实时进度、计票规则说明卡片 |
+| 4 | 投票详情 | `/votes/[instanceNodeId]` | `VOTE_READ` | 表单数据只读视图、**按部门分组的投票明细（默认仅本部门可见）**、投票动作区（同意/反对 + 意见，**必须表态**）、实时进度、计票规则说明卡片、**投票结论区（全员表态后由指定人填写）** |
 | 5 | 流程实例列表 | `/instances` | `INSTANCE_READ` | 筛选（状态/模板/时间/发起人）、表格、导出 |
 | 6 | 发起流程 | `/instances/new` | `INSTANCE_CREATE` | 模板选择器（卡片式）、按 JSON Schema 渲染表单、发起前预览「本次将产生的层级与投票人」、提交/存草稿 |
 | 7 | 流程详情 | `/instances/[id]` | `INSTANCE_READ` | 层级步骤条（Stepper）、各层投票结果卡、任务群列表、上报记录、时间线、附件、评论、操作区（撤回/重提/催办/上报） |
 | 8 | 任务中心 | `/tasks` | `TASK_READ` | 三视图切换：**看板**（dnd-kit 拖拽改状态）/ **列表**（表格 + 批量）/ **甘特**（缩放 + 依赖连线）、筛选与分组、我的/我部门/全部 |
 | 9 | 任务详情 | `/tasks/[id]` | `TASK_READ` | 头部（状态/优先级/负责人/验收人/截止倒计时）、描述、检查项、子任务树、依赖关系图、附件、操作日志、操作区（接受/转派/提交验收/验收） |
 | 10 | 上报中心 | `/escalations` | `ESC_READ` | 分段「待我部门处理 / 我发起的 / 全部」、状态漏斗图、列表（含来源类型徽标、耗时） |
-| 11 | 上报详情 | `/escalations/[id]` | `ESC_READ` | **上报链时间线**（逐级可视化，含每级处理人与耗时）、来源对象卡片（可跳原流程/任务）、上级部门选择器、处理动作面板、结论与附件 |
+| 11 | 上报详情 | `/escalations/[id]` | `ESC_READ` | **上报链时间线**（逐级可视化，含每级处理人与耗时）、来源对象卡片（可跳原流程/任务）、目标部门（**逐级上溯，不允许越级**）、**该实例全部层级的投票明细（上级部门可见）**、处理动作面板、结论与附件 |
 | 12 | 流程设计器 | `/admin/workflow-templates`、`/admin/workflow-templates/[id]` | `WF_DESIGN` | 左侧节点库、中间画布（节点卡片 + 连线 + 层号泳道）、右侧属性面板（投票人规则/投票规则/任务模板/上报规则/超时策略 Tab）、版本列表与发布 |
 | 13 | 任务分配器 | `/admin/assignee-rules` | `TASK_DESIGN` | 分配算法选择（手动/角色/部门/投票组/负载均衡/抢单）、规则 DSL 编辑与**在线试算**（给定模拟任务 → 输出命中人与理由）、负载预览 |
 | 14 | 统计报表 | `/stats` | `STATS_READ` | 4 个 Tab：投票（通过率/规则分布/平均票耗时）、层级耗时（各层箱线/柱状）、任务（完成率/逾期率/负载热力）、上报（触发源分布/上溯层级分布/处理时长） |
@@ -71,7 +71,7 @@ app/
 
 ## 3. 关键页面的信息设计
 
-### 3.1 工作台（用户明确要求的 8 个区块）
+### 3.1 工作台（用户要求的 8 个区块 + 新增 1 个）
 
 | 区块 | 内容 | 数据来源 | 交互 |
 | --- | --- | --- | --- |
@@ -83,6 +83,7 @@ app/
 | 进行中 | 租户内我可见的进行中实例 | `GET /instances?status=active` | 跳列表 |
 | 已结束 | 近 30 天完结实例 | `GET /instances?status=closed&range=30d` | 跳列表 |
 | 逾期预警 | 逾期任务 + 临期节点（≤ 24h） | `GET /stats/overdue-warnings` | 跳任务中心/投票中心 |
+| 待我填写结论 | 全员已表态、等我填写投票结论的节点 | `GET /votes?scope=to-conclude` | 跳投票详情 · 结论区 |
 
 ### 3.2 投票详情页（核心交互）
 
@@ -91,8 +92,9 @@ app/
 | 区域 | 元素 |
 | --- | --- |
 | 左：上下文 | 申请表单只读渲染、发起人与发起时间、附件列表、评论区 |
-| 中：投票区 | 同意 / 反对 / 弃权 三按钮 + 意见输入（反对时必填）；已投票则显示我的选择与时间并允许一次改票；底部实时进度条（同意/反对/弃权分段） |
-| 右：规则与人员 | 计票规则卡片（人类可读翻译，例如「≥ 60% 同意且无人反对，弃权不计入分母」）、同层投票人头像组（状态点：已投/未投/超时）、截止倒计时、催办按钮 |
+| 中：投票区 | 同意 / 反对 两按钮 + 意见输入（反对时必填，**无弃权选项**）；已投票则显示我的选择与时间，**结论形成前可反复改票**（改票按钮 + 历史轨迹）；底部实时进度条（同意/反对分段） |
+| 右：规则与人员 | 计票规则卡片（人类可读翻译，例如「全员必须表态；≥ 60% 同意且无人反对即拟通过」）、**按部门分组的投票明细**（本部门显示姓名与选择，其他部门仅显示"已投 N/M"）、截止倒计时、催办按钮 |
+| 下：结论区 | 全员表态后出现：系统自动判定结果（拟通过/拟驳回）+ 计票明细、结论填写表单（结论类型 + 结论意见必填 + 附件）、改判时强制填写理由、提交后展示结论卡片（填写人/时间/是否改判） |
 
 ### 3.3 上报详情页（上报链可视化）
 
@@ -131,7 +133,7 @@ app/
 | 状态 | 语义色 | 状态 | 语义色 |
 | --- | --- | --- | --- |
 | `DRAFT` | 中性 | `PASSED` / `APPROVED` / `DONE` / `ADOPTED` | 成功 |
-| `VOTING` / `IN_PROGRESS` / `SUBMITTED` / `TASKING` | 信息 | `PENDING` / `PENDING_ACCEPT` / `PENDING_ACCEPTANCE` | 警告 |
+| `VOTING` / `IN_PROGRESS` / `SUBMITTED` / `TASKING` / `PENDING_CONCLUSION` | 信息 | `PENDING` / `PENDING_ACCEPT` / `PENDING_ACCEPTANCE` | 警告 |
 | `REJECTED` / `OVERDUE` | 危险 | `TIMEOUT` / `ESCALATED` / `SUSPENDED` / `BLOCKED` | 警告（描边） |
 | `CLOSED` / `CANCELLED` / `SKIPPED` | 中性弱化 | `RETURNED` / `UPGRADED` | 警告 |
 
@@ -157,7 +159,7 @@ app/
 
 | 概念 | 说明 |
 | --- | --- |
-| 权限点 | `模块_动作` 形式，如 `VOTE_CAST`、`TASK_ASSIGN`、`ESC_UPGRADE`、`WF_PUBLISH`、`AUDIT_EXPORT`、`ORG_MANAGE`、`ROLE_MANAGE`、`STATS_READ` |
+| 权限点 | `模块_动作` 形式，如 `VOTE_CAST`、`VOTE_VIEW_DEPT`、`VOTE_VIEW_ALL`（仅上报链上级部门）、`NODE_CONCLUDE`（填写投票结论）、`TASK_ASSIGN`、`ESC_UPGRADE`、`ESC_CROSS_LEVEL`（默认关闭，越级已禁止）、`WF_PUBLISH`、`AUDIT_EXPORT`、`ORG_MANAGE`、`ROLE_MANAGE`、`STATS_READ` |
 | 数据范围 | `SELF` / `DEPT` / `DEPT_AND_SUB` / `DEPT_LIST`（指定部门）/ `TENANT`（全租户），挂在 `UserRole.scopeType + scopeId` |
 | 前端用法 | `usePermissions()` 返回 `{ can(code), scope, deptIds }`；路由守卫 + 按钮级 `can()`；**前端隐藏只是体验，真实拒绝在后端守卫** |
 | 后端用法 | `JwtAuthGuard`（身份）→ `PermissionGuard`（权限点）→ `DataScopeGuard`（把范围注入 `RequestContext`）→ Repository 统一拼 `tenantId + scope` 条件 |
@@ -167,6 +169,8 @@ app/
 | WebSocket 事件 | 房间 | UI 响应 |
 | --- | --- | --- |
 | `vote.cast` | `instance:{id}` | 投票详情进度条与头像组即时更新；触发 `invalidateQueries(['votes'])` |
+| `conclusion.pending` | `instance:{id}`、`user:{concluderId}` | 投票详情出现结论填写区；结论人收到通知 + 工作台「待我填写结论」+1 |
+| `conclusion.submitted` | `instance:{id}` | 展示结论卡片；节点状态变为通过/驳回；步骤条前进 |
 | `node.passed` / `node.rejected` / `node.timeout` | `instance:{id}` | 层级步骤条前进/标红；Toast 提示；若当前层变为待我投票则侧边栏徽标 +1 |
 | `task.created` / `task.updated` | `user:{id}`、`dept:{id}` | 任务卡片飞入动画；看板列内重排；徽标更新 |
 | `task.overdue` | `user:{id}`、`dept:{id}` | 卡片转危险色 + 逾期标签；工作台预警区插入 |

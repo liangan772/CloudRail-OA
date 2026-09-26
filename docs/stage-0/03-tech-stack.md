@@ -101,8 +101,9 @@ oa/
 │   │   │   │   ├ workflow/                 # 模板版本、节点图校验
 │   │   │   │   ├ vote/                     # VoteEngine（纯函数计票）+ 类型
 │   │   │   │   ├ node/                     # NodeStateMachine 转移表 + guards/actions
+│   │   │   │   ├ conclusion/               # 投票结论：系统拟判定 vs 人工结论、改判校验
 │   │   │   │   ├ task/                     # TaskEngine 状态机 + 分配算法
-│   │   │   │   ├ escalation/               # EscalationEngine 目标解析 + 状态机
+│   │   │   │   ├ escalation/               # EscalationEngine 目标解析（仅逐级）+ 状态机
 │   │   │   │   └ rule/                     # RuleEngine JSON DSL 求值器
 │   │   │   ├ modules/                      # 应用层（按聚合划分的 Nest 模块）
 │   │   │   │   ├ auth/  org/  user/  rbac/
@@ -234,7 +235,7 @@ oa/
 ```
 InfraModule (global)         Prisma / Redis / Queue / Storage / Logger / Outbox
     ↑
-DomainModule (pure)          VoteEngine / NodeStateMachine / TaskEngine / EscalationEngine / RuleEngine
+DomainModule (pure)          VoteEngine / NodeStateMachine / ConclusionPolicy / TaskEngine / EscalationEngine / RuleEngine
     ↑                         （无 Nest 依赖，仅被 Service 组合调用；核心为纯函数，可独立单测）
     ↑
 AuthModule  OrgModule  RbacModule  UserModule
@@ -271,10 +272,11 @@ WorkflowTemplateModule → InstanceModule → VoteModule
 
 | 引擎 | 纯函数签名（示意） | 说明 |
 | --- | --- | --- |
-| `VoteEngine` | `tally(input: TallyInput): TallyResult` | 输入票集合 + 规则 + 投票人集合，输出计数/加权分/判定/快照；**零 IO** |
+| `VoteEngine` | `tally(input: TallyInput): TallyResult` | 输入票集合 + 规则 + 投票人集合，输出计数/加权分/**系统拟判定**/快照；前置校验「全员是否已表态」；**零 IO** |
+| `ConclusionPolicy` | `canConclude(actor, ctx) / applyConclusion(systemDecision, input): FinalDecision` | 结论填写人资格判定、`MANUAL_CONFIRM` 下「确认 vs 改判」校验、改判理由强制校验、`isOverride` 标记 |
 | `NodeStateMachine` | `next(state, event, ctx): TransitionResult` | 返回下一状态 + 需执行的副作用列表（创建任务/创建下一层/创建上报），由 Service 执行 |
 | `TaskEngine` | `resolveAssignees(ctx) / next(state, event) / isUnblocked(task, deps)` | 分配算法与任务状态机 |
-| `EscalationEngine` | `resolveTargetDept(ctx) / next(state, event)` | 直接上级 / 逐级 / 越级 / 指定部门 四种解析 |
+| `EscalationEngine` | `resolveTargetDept(ctx) / next(state, event)` | **仅直接上级 / 逐级上溯**两种解析（越级默认禁止，开关可启） |
 | `RuleEngine` | `evaluate(rule: RuleNode, ctx: RuleContext): boolean / explain()` | JSON DSL 求值 + `explain()` 返回命中路径用于「为什么上报」解释 |
 
 ## 8. 环境风险与对策（已实测）

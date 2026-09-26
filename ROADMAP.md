@@ -17,6 +17,9 @@
 | C8 | 部署极简：开发一条命令，生产一台机器 + 一个 compose | dev 只起 postgres+redis；prod 四个服务 + Caddy/rewrites，**不引入 K8s / Nginx / Prometheus** |
 | C9 | 所有状态变更走领域服务，禁止直接改库 | 统一 `TransitionGuard + AuditLog + OutboxEvent + WS 广播` 四点式落库 |
 | C10 | 分阶段交付，每阶段结束必须汇报并等待确认 | 见下方阶段表与汇报模板 |
+| C11 | 投票明细**按部门可见**：投票人只能看到本部门明细，上级部门可看到上报相关的全部明细 | `VoteViewScope=DEPT_ONLY` + 上报链可见性覆盖；跨部门只给聚合计数 |
+| C12 | **每个投票人都必须表态**，且每层形成**人工投票结论** | 默认不允许弃权；未全员表态不得进入结论；`PENDING_CONCLUSION` 状态 + `VoteConclusion` 人工结论实体 |
+| C13 | **不允许越级上报** | `EscalationEngine` 只支持「直接上级」与「逐级上溯」，跳级能力默认关闭 |
 
 ## 二、阶段划分与交付物
 
@@ -24,8 +27,8 @@
 | --- | --- | --- | --- |
 | 0 | 需求澄清、信息架构、技术选型、数据模型草案 | `ROADMAP.md`、`docs/stage-0/*` | ✅ 已完成，待确认 |
 | 1 | Prisma Schema、共享类型与枚举、种子数据 | `apps/api/prisma/schema.prisma`、`packages/shared`、`prisma/seed.ts`、monorepo 脚手架 | ⏸ 未开始 |
-| 2 | 后端核心：Auth、Org、Workflow、VoteEngine、NodeStateMachine、RuleEngine | 可运行的 API + 单测（计票/状态机/规则求值） | ⏸ 未开始 |
-| 3 | 后端扩展：TaskEngine、EscalationEngine、BullMQ、WebSocket、审计、Outbox | 队列消费者 + 网关 + 审计与发件箱 | ⏸ 未开始 |
+| 2 | 后端核心：Auth、Org、Workflow、VoteEngine、NodeStateMachine、RuleEngine、**投票结论（VoteConclusion）** | 可运行的 API + 单测（计票/全员表态/结论/状态机/规则求值） | ⏸ 未开始 |
+| 3 | 后端扩展：TaskEngine、EscalationEngine（仅逐级）、BullMQ、WebSocket、审计、Outbox | 队列消费者 + 网关 + 审计与发件箱 | ⏸ 未开始 |
 | 4 | 前端基础：布局、主题、路由、API Client、状态管理、通用组件 | 设计系统 + 应用骨架 + 可登录 | ⏸ 未开始 |
 | 5 | 前端业务：工作台、投票中心、流程详情、任务中心、上报中心、流程设计器、统计 | 全部业务页面可交互 | ⏸ 未开始 |
 | 6 | 简化部署、联调、测试、文档、验收 | `docker-compose.dev/prod.yml`、启动与备份脚本、联调文档、验收清单 | ⏸ 未开始 |

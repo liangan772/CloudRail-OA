@@ -20,6 +20,9 @@
 | 计票快照 | `VoteResult` | 该层结论的不可变记录，含计数、加权分、规则快照 |
 | 任务 | `Task` | 投票通过后要执行的协作单元，可嵌套子任务 |
 | 上报 | `Escalation` | 把决策权上交给上级部门；带完整链路 `EscalationChain` |
+| 投票结论 | `VoteConclusion` | 本层**全员表态后由指定人填写的人工结论**；可确认或改判系统自动判定 |
+| 可见范围 | `VoteViewScope` | 投票明细的可见边界：默认仅本部门，上报链上的上级部门可见全部 |
+| 表态 | `stated` | 投票人已提交明确选择（同意/反对）；未表态不算投票，且**不允许弃权** |
 | 有效票 | `denominator` | 参与通过率计算的分母，取决于 `abstainPolicy` |
 | 否决优先 | veto-priority | 判定顺序：否决规则命中即驳回，不再看通过规则 |
 
@@ -87,7 +90,7 @@ Tenant ─┬─ User ─┬─ UserDepartment ── Department(自引用 paren
 | `WorkflowNode` | `id, versionId, type, name, order, config(JSONB), *layerIndex, *nodeKey` | `(versionId, order)` 索引；唯一 `(versionId, nodeKey)` |
 | `WorkflowEdge` | `id, versionId, fromNodeId, toNodeId, condition(JSONB), *priority, *label` | `(versionId, fromNodeId)` 索引 |
 | `NodeVoterRule` | `id, nodeId, voterType, voterValue(JSONB), weight, *isRequired, *order` | `(nodeId)` 索引；voterValue 结构见 §7 |
-| `NodeVoteRule` | `id, nodeId, passRule, passThreshold, rejectRule, rejectThreshold, abstainPolicy, timeoutPolicy, visibility, *timeoutHours, *allowRevote, *tiePolicy, *quorum` | `nodeId` 唯一（1:1） |
+| `NodeVoteRule` | `id, nodeId, passRule, passThreshold, rejectRule, rejectThreshold, abstainPolicy, timeoutPolicy, visibility, *viewScope(默认 DEPT_ONLY), *timeoutHours, *allowAbstain(默认 false), *requireAllVote(默认 true), *revotePolicy(默认 UNLIMITED_BEFORE_CONCLUSION), *vetoTerminates(默认 false), *tiePolicy, *conclusionMode(默认 MANUAL_CONFIRM), *conclusionAuthorRule(JSONB), *remindIntervalHours, *maxRemindRounds, *quorum` | `nodeId` 唯一（1:1） |
 | `NodeTaskTemplate` | `id, nodeId, title, assigneeRule(JSONB), priority, dueOffset, checklist(JSONB), *acceptanceRule(JSONB), *triggerOn(PASS/ALWAYS)` | `(nodeId, order)` 索引 |
 | `NodeEscalationRule` | `id, nodeId, triggerType, condition(JSONB), targetDeptRule(JSONB), timeout, autoApprove, *freezeSource, *maxLevel, *skipLevels` | `(nodeId, triggerType)` 索引 |
 
@@ -96,10 +99,11 @@ Tenant ─┬─ User ─┬─ UserDepartment ── Department(自引用 paren
 | 实体 | 关键字段 | 约束与索引 |
 | --- | --- | --- |
 | `WorkflowInstance` | `id, tenantId, templateVersionId, initiatorId, title, formData(JSONB), status, currentNodeId, startedAt, endedAt, *code, *layerIndex, *suspendedFrom, *priority, *summary` | **组合索引 `(tenantId, status, startedAt)`**；唯一 `(tenantId, code)` |
-| `InstanceNode` | `id, instanceId, nodeId, type, status, startedAt, endedAt, deadline, result(JSONB), *layerIndex, *round, *escalationId` | 唯一 `(instanceId, nodeId, round)`；**`(tenantId, status, deadline)`**（超时扫描核心索引） |
+| `InstanceNode` | `id, instanceId, nodeId, type, status, startedAt, endedAt, deadline, result(JSONB), *layerIndex, *round, *escalationId, *conclusionStatus, *conclusionDeadline` | 唯一 `(instanceId, nodeId, round)`；**`(tenantId, status, deadline)`**（超时扫描核心索引） |
 | `InstanceNodeVoter` | `id, instanceNodeId, userId, weight, status, votedAt, *sourceRuleId, *sourceReason, *delegateFromUserId, *remindedAt, *remindCount` | **唯一 `(instanceNodeId, userId)`**；`(instanceNodeId, status)` 索引 |
 | `Vote` | `id, instanceNodeId, voterId, decision, comment, weight, createdAt, *revoteSeq, *isReplaced, *replacedById, *delegateFromUserId, *ip, *ua` | 唯一 `(instanceNodeId, voterId, revoteSeq)`；`(instanceNodeId, isReplaced)` 索引。**只 INSERT，不 UPDATE/DELETE**（改票 = 新行 + 旧行 `isReplaced=true`） |
 | `VoteResult` | `id, instanceNodeId, approveCount, rejectCount, abstainCount, weightedScore, passed, snapshot(JSONB), *ruleSnapshot(JSONB), *denominator, *tieResolvedBy, *decidedBy, *decidedAt` | `instanceNodeId` 唯一 |
+| `VoteConclusion` | `id, tenantId, instanceNodeId, authorId, decision(APPROVE/REJECT), systemDecision, isOverride, content, attachments(JSONB), createdAt, *overrideReason, *round` | 唯一 `(instanceNodeId, round)`；`(authorId, createdAt)` 索引。**提交后不可修改**（如需重填走新一轮 `round`） |
 
 ### 4.4 任务
 
@@ -120,6 +124,8 @@ Tenant ─┬─ User ─┬─ UserDepartment ── Department(自引用 paren
 | `Escalation` | `id, tenantId, sourceType, sourceId, instanceId, taskId, fromDeptId, toDeptId, reason, status, requestedBy, handledBy, handledAt, result, comment, *code, *level, *triggerType, *targetRule, *deadline, *frozenInstanceStatus, *maxLevel` | **`(toDeptId, status)`**、`(instanceId)`、`(tenantId, status, createdAt)` |
 | `EscalationChain` | `id, escalationId, level, deptId, handlerId, status, handledAt, *enteredAt, *actionType, *comment, *deadline` | 唯一 `(escalationId, level)` |
 | `EscalationRecord` | `id, escalationId, actorId, action, comment, attachments(JSONB), createdAt, *fromStatus, *toStatus` | `(escalationId, createdAt)` |
+
+**目标部门解析（用户已确认：不允许越级）**：`toDeptId` 只能取 `Department.parentId`（直接上级）或沿 `Department.path` **逐级上溯一级**（`LEVEL_UP` 每级单独成链，不允许一次跳多级）。`SKIP_TO_LEVEL` / 指定非直接上级部门仅在租户开关 `allowCrossLevel=true` 时可用，且需 `ESC_CROSS_LEVEL` 权限 + 理由必填。
 
 ### 4.6 通用与平台
 
@@ -149,15 +155,20 @@ Tenant ─┬─ User ─┬─ UserDepartment ── Department(自引用 paren
 | --- | --- | --- |
 | 流程 | `WorkflowNodeType` | `START, VOTE, TASK, ESCALATION, CONDITION, END` |
 | 流程 | `InstanceStatus` | `DRAFT, VOTING, APPROVED, REJECTED, ESCALATED, SUSPENDED, CLOSED` |
-| 流程 | `InstanceNodeStatus` | `PENDING, VOTING, PASSED, REJECTED, TIMEOUT, ESCALATED, SKIPPED, DONE` |
+| 流程 | `InstanceNodeStatus` | `PENDING, VOTING, PENDING_CONCLUSION, PASSED, REJECTED, TIMEOUT, ESCALATED, SKIPPED, DONE` |
 | 模板 | `TemplateStatus` | `DRAFT, PUBLISHED, ARCHIVED` |
 | 投票 | `VoterType` | `USER, ROLE, DEPARTMENT, VOTE_GROUP, DYNAMIC` |
 | 投票 | `PassRule` | `ALL, MAJORITY, RATIO, WEIGHTED, AT_LEAST_N` |
 | 投票 | `RejectRule` | `ANY_VETO, OPPOSE_OVER, NONE` |
 | 投票 | `AbstainPolicy` | `COUNT_IN_DENOMINATOR, EXCLUDE_FROM_DENOMINATOR, AS_APPROVE, AS_REJECT` |
-| 投票 | `TimeoutPolicy` | `REMIND_ONLY, AUTO_APPROVE, AUTO_REJECT, ESCALATE` |
-| 投票 | `VoteVisibility` | `PUBLIC, RESULT_ONLY, ANONYMOUS` |
-| 投票 | `VoteDecision` | `APPROVE, REJECT, ABSTAIN` |
+| 投票 | `TimeoutPolicy` | `REMIND_ONLY`（默认）、`AUTO_REJECT`、`ESCALATE`、`AUTO_APPROVE`（**默认禁用**，需租户开关 `allowAutoApprove`） |
+| 投票 | `VoteVisibility` | `PUBLIC, RESULT_ONLY, ANONYMOUS`（记名方式） |
+| 投票 | `VoteViewScope` | `DEPT_ONLY`（**默认**）、`TENANT`；上报链上级部门由可见性覆盖规则放行，不依赖此值 |
+| 投票 | `VoteDecision` | `APPROVE, REJECT, ABSTAIN`（`ABSTAIN` 默认禁用，由 `allowAbstain` 控制） |
+| 投票 | `RevotePolicy` | `NOT_ALLOWED, ONCE, UNLIMITED_BEFORE_CONCLUSION`（**默认**） |
+| 投票 | `ConclusionMode` | `AUTO, MANUAL_CONFIRM`（**默认**）、`MANUAL_OVERRIDE` |
+| 投票 | `ConclusionDecision` | `APPROVE, REJECT` |
+| 投票 | `ConclusionStatus` | `NOT_REQUIRED, PENDING, SUBMITTED, TIMEOUT` |
 | 投票 | `TiePolicy` | `REJECT, ESCALATE, CHAIRMAN_VOTE` |
 | 投票 | `VoterStatus` | `PENDING, VOTED, TIMEOUT, DELEGATED, SKIPPED` |
 | 任务 | `TaskStatus` | `PENDING_ASSIGN, PENDING_ACCEPT, IN_PROGRESS, PENDING_ACCEPTANCE, DONE, OVERDUE, CANCELLED, BLOCKED, ESCALATED` |
@@ -168,7 +179,7 @@ Tenant ─┬─ User ─┬─ UserDepartment ── Department(自引用 paren
 | 上报 | `EscalationSourceType` | `VOTE, TASK, INSTANCE, MANUAL` |
 | 上报 | `EscalationStatus` | `PENDING, SUBMITTED, ACCEPTED, VOTING, TASKING, RETURNED, ADOPTED, UPGRADED, CLOSED` |
 | 上报 | `EscalationTrigger` | `MANUAL, TIMEOUT, TIE, REPEATED_REJECT, OVER_LIMIT, CROSS_DEPT_DISPUTE, INSUFFICIENT_PERMISSION, TASK_BLOCKED, TASK_OVERDUE` |
-| 上报 | `TargetDeptRule` | `DIRECT_PARENT, LEVEL_UP, SKIP_TO_LEVEL, SPECIFIC_DEPT, BY_RULE` |
+| 上报 | `TargetDeptRule` | `DIRECT_PARENT`（默认）、`LEVEL_UP`；`SKIP_TO_LEVEL` / `SPECIFIC_DEPT` **已移除默认能力**，需租户开关 `allowCrossLevel=true` 才启用（用户已确认不允许越级） |
 | 上报 | `EscalationAction` | `ACCEPT, RETURN, REQUEST_MORE, START_VOTE, ASSIGN_TASK, UPGRADE, FINAL_DECIDE, CLOSE` |
 | 上报 | `EscalationResult` | `CONTINUE, RETURN, FINAL_APPROVE, FINAL_REJECT, CLOSE` |
 | 权限 | `ScopeType` | `SELF, DEPT, DEPT_AND_SUB, DEPT_LIST, TENANT` |
@@ -214,26 +225,35 @@ VOTING ──withdraw──▶ CLOSED（发起人撤回，需权限与状态校�
 ### 6.2 层级节点 `InstanceNode`
 
 ```
-PENDING ──open──▶ VOTING ──passRule──▶ PASSED ──▶ DONE
-                     ├──rejectRule──▶ REJECTED ──▶ DONE
-                     ├──deadline──▶ TIMEOUT ─┬─ AUTO_APPROVE ─▶ PASSED
-                     │                       ├─ AUTO_REJECT ─▶ REJECTED
-                     │                       ├─ ESCALATE ─▶ ESCALATED
-                     │                       └─ REMIND_ONLY ─▶ VOTING（重置新 deadline）
+PENDING ──open──▶ VOTING ──全员表态+计票──▶ PENDING_CONCLUSION ──提交人工结论──▶ PASSED ──▶ DONE
+                     │                                                        └─REJECTED──▶ DONE
+                     │（否决票：只锁定"不予通过"，仍等全员表态）
+                     ├──deadline──▶ TIMEOUT ─┬─ 应用 timeoutPolicy ─▶ PENDING_CONCLUSION（系统拟判定）
+                     │                        ├─ ESCALATE ─▶ ESCALATED
+                     │                        └─ REMIND_ONLY ─▶ VOTING（重设 deadline，最多 maxRemindRounds 轮）
                      ├──escalation──▶ ESCALATED ──resume──▶ VOTING
                      └──condition/无效──▶ SKIPPED ──▶ DONE
+
+PENDING_CONCLUSION ──结论填写超时──▶ ESCALATED（交上级裁定，避免结论卡死）
 ```
 
 | 当前状态 | 事件 | 守卫条件 | 下一状态 | 副作用 |
 | --- | --- | --- | --- | --- |
 | PENDING | `OPEN` | 上一层 `DONE` 或为首层 | VOTING | 生成 `InstanceNodeVoter`（已快照则复用）；置 `startedAt/deadline`；发通知；投递 `vote.timeout` |
-| VOTING | `VOTE_CAST` | 投票人在快照名单内、未投或允许改票、未过截止 | VOTING（或直接终结，见 `VoteEngine`） | 写 `Vote`；重算进度；WS `vote.cast` |
-| VOTING | `TALLY_RESULT(passed=true)` | `passRule` 满足且 `rejectRule` 未命中 | PASSED | 写 `VoteResult`；取消 timeout 任务；WS `node.passed`；触发任务创建/下一层 |
-| VOTING | `TALLY_RESULT(passed=false)` | `rejectRule` 命中，或全员投完仍未达通过阈值（含平票策略） | REJECTED | 写 `VoteResult`；WS `node.rejected` |
-| VOTING | `DEADLINE_HIT` | 有未投票人 | TIMEOUT | 按 `timeoutPolicy` 分流（详见 §8.4） |
-| VOTING | `ESCALATE` | 规则命中（平票 / 超时 / 连续驳回 / 超限 / 争议） | ESCALATED | 创建 `Escalation`；节点挂起计时 |
+| VOTING | `VOTE_CAST` | 投票人在快照名单内；本轮结论未形成（`revotePolicy=UNLIMITED_BEFORE_CONCLUSION` 允许反复改票）；未过截止 | VOTING | 新增一行 `Vote` + 旧票标记 `isReplaced=true`；重算进度；WS `vote.cast` |
+| VOTING | `VETO_LOCK` | `rejectRule` 命中且 `vetoTerminates=false`（默认） | VOTING（标记否决锁定） | 记录 `vetoLocked`；**仍等待全员表态**；通知结论填写人 |
+| VOTING | `ALL_STATED` | `requireAllVote=true` 时全员已表态（`VOTED` / `DELEGATED`） | PENDING_CONCLUSION | 计票产出**系统拟判定**（否决锁定则拟驳回）；写 `VoteResult`（`isProvisional=true`）；`conclusionStatus=PENDING`；通知结论填写人；投递结论超时任务；WS `conclusion.pending` |
+| VOTING | `DEADLINE_HIT` | 存在未表态人 | TIMEOUT | 停止计时；记录未表态名单；通知 |
+| TIMEOUT | `APPLY_POLICY(REMIND_ONLY)` | `remindCount < maxRemindRounds`（默认 3） | VOTING | 重设 deadline（+`remindIntervalHours`，默认 8h）；`remindCount++`；再次催办 |
+| TIMEOUT | `APPLY_POLICY(REMIND_ONLY 超轮次)` | `remindCount >= maxRemindRounds` | ESCALATED | **强制上报**，避免节点永久悬挂 |
+| TIMEOUT | `APPLY_POLICY(AUTO_REJECT)` | — | PENDING_CONCLUSION | 未表态视为反对；系统拟判定 = 驳回 |
+| TIMEOUT | `APPLY_POLICY(AUTO_APPROVE)` | 租户开关 `allowAutoApprove=true`（**默认禁用**） | PENDING_CONCLUSION | 未表态视为同意 |
+| TIMEOUT | `APPLY_POLICY(ESCALATE)` | — | ESCALATED | 创建 `Escalation`（`triggerType=TIMEOUT`） |
+| VOTING / TIMEOUT | `ESCALATE` | 规则命中（平票 / 拒绝上报 / 超限 / 争议） | ESCALATED | 创建 `Escalation`；节点暂停计时 |
+| PENDING_CONCLUSION | `SUBMIT_CONCLUSION` | 填写人具 `NODE_CONCLUDE` 权限；改判时理由必填 | PASSED 或 REJECTED | 写 `VoteConclusion`（记 `isOverride`）；`VoteResult` 补最终判定；取消超时任务；WS `conclusion.submitted`；触发任务创建/下一层 |
+| PENDING_CONCLUSION | `CONCLUSION_TIMEOUT` | 结论填写超时（默认 24h） | ESCALATED | 上报上级部门裁定（`triggerType=CONCLUSION_TIMEOUT`） |
 | ESCALATED | `RESUME` | 上级 `CONTINUE` | VOTING | 重开投票（保留已投票，或按配置重新计票，见 §12 建议 6） |
-| ESCALATED | `FINAL` | 上级终审 | PASSED 或 REJECTED | 用上级结论写 `VoteResult`（`tieResolvedBy = ESCALATION`） |
+| ESCALATED | `FINAL` | 上级终审 | PASSED 或 REJECTED | 写 `VoteResult`（`tieResolvedBy = ESCALATION`），并生成系统代填的 `VoteConclusion`（`isOverride=true`、`authorId=null`、原因=上级终审） |
 | 任意 | `SKIP` | 条件分支未命中 / 节点被配置跳过 | SKIPPED | 记录跳过原因；继续下一节点 |
 | PASSED / REJECTED / TIMEOUT / SKIPPED | `COMPLETE` | 相关任务已创建 | DONE | 触发 `NodeStateMachine` 推进实例 |
 
@@ -277,6 +297,8 @@ PENDING ──submit──▶ SUBMITTED ──accept──▶ ACCEPTED ─┬─
    ACCEPTED ──finalDecide──▶ ADOPTED / RETURNED
 ```
 
+> 越级（跳级）不在本版本支持范围：`advance()` 只能沿 `Department.parentId` 走**一级**，因此 `EscalationChain.level` 必然连续（1,2,3…），不存在缺口。
+
 | 当前状态 | 事件 | 守卫条件 | 下一状态 | 副作用 |
 | --- | --- | --- | --- | --- |
 | PENDING | `SUBMIT` | 触发源校验；目标部门解析成功 | SUBMITTED | 建 `Escalation` + `EscalationChain(L1)`；**冻结原流程**（默认）；通知目标部门；WS `escalation.created` |
@@ -307,6 +329,16 @@ PENDING ──submit──▶ SUBMITTED ──accept──▶ ACCEPTED ─┬─
 
 ## 8. 计票规则形式化（`VoteEngine` 权威定义）
 
+### 8.0 三条不可绕过的前置约束（来自用户确认）
+
+| 约束 | 定义 | 违反后果 |
+| --- | --- | --- |
+| **必须表态** | 每个 `InstanceNodeVoter` 必须提交 `APPROVE` 或 `REJECT`（`allowAbstain=false` 时不允许 `ABSTAIN`），才算「已表态」；委托投票（`Delegation`）由受托人代为表态，计入本人 | 调用投票接口返回 `VOTE_ABSTAIN_NOT_ALLOWED`；节点无法进入结论阶段 |
+| **全员表态才出结论** | `requireAllVote=true`（默认）时，`statedCount = N` 之前**不得进入 `PENDING_CONCLUSION`**；未表态者只能通过超时策略消解（催办 → 上报 / 视为反对） | `ALL_STATED` 事件被守卫拒绝 |
+| **结论必须人工填写** | `conclusionMode=MANUAL_CONFIRM`（默认）时，系统计票结果只是**拟判定**，必须有 `VoteConclusion` 才能推进流程 | 节点停留在 `PENDING_CONCLUSION`，超时则上报 |
+
+**否决锁定**：`rejectRule` 命中时（`vetoTerminates=false`，默认）不是立刻终结投票，而是把本层锁定为「不予通过」——即使后续计票满足 `passRule`，拟判定仍为驳回。这样既落实一票否决，又不剥夺其他人表态的权利（澄清项 Q20）。
+
 ### 8.1 符号
 
 | 符号 | 含义 |
@@ -317,8 +349,13 @@ PENDING ──submit──▶ SUBMITTED ──accept──▶ ACCEPTED ─┬─
 | `Wtotal` | 该层全部投票人权重和 |
 | `D` | 有效票分母 `denominator` |
 | `A' / R'` | 按弃权策略折算后的同意 / 反对有效数 |
+| `stated` | 已表态人数（`InstanceNodeVoter.status ∈ {VOTED, DELEGATED}`） |
+| `vetoLocked` | 是否已被否决规则锁定为不予通过 |
+| `systemDecision` | 系统拟判定（`APPROVE` / `REJECT`），由计票产出，交由人工结论确认或改判 |
 
 ### 8.2 弃权策略 → 分母与折算
+
+> 默认 `allowAbstain=false`（全员必须表态），此时 `B = 0`，下表策略**不生效**；仅在模板显式开启弃权后按下表折算。
 
 | `abstainPolicy` | `D` | `A'` | `R'` |
 | --- | --- | --- | --- |
@@ -336,24 +373,41 @@ PENDING ──submit──▶ SUBMITTED ──accept──▶ ACCEPTED ─┬─
 | `PASS/RATIO` | `A' / D >= passThreshold` | `passThreshold ∈ (0,1]`，默认 0.6 |
 | `PASS/WEIGHTED` | `Wa' / Wtotal >= passThreshold` | 权重制，支持「部门长权重 2」 |
 | `PASS/AT_LEAST_N` | `A' >= passThreshold`（整数 N） | 与总人数无关 |
-| `REJECT/ANY_VETO` | `R' >= 1` | 一票否决；可配置为「仅 veto 权重者生效」 |
+| `REJECT/ANY_VETO` | `R' >= 1` | 一票否决；默认只**锁定不予通过**（仍等全员表态），`vetoTerminates=true` 才立即终结投票 |
 | `REJECT/OPPOSE_OVER` | `R' / D > rejectThreshold` | `rejectThreshold ∈ (0,1)`，默认 0.34 |
 | `REJECT/NONE` | 不因反对直接失败 | 仅靠通过规则判定 |
 
 ### 8.4 判定顺序（唯一权威流程）
 
 ```
-1) 校验：投票期内？投票人有资格？重复票？        → 否：抛 VOTE_* 错误
-2) 写入票（事务内 + 唯一约束兜底）
-3) 重算 A/R/B/Wa/Wr/D/A'/R'
-4) 否决优先：rejectRule 命中 → REJECTED（写 VoteResult，终结）
-5) 通过判定：passRule 命中 → PASSED（写 VoteResult，终结）
-   例外：ALL / AT_LEAST_N 类规则必须等「全员已投票」或「已到 deadline」才可判定 PASS
-6) 全员已投票但仍未达通过阈值：
-   ├ 同意 = 反对（平票）→ tiePolicy：REJECT → 终结；ESCALATE → 创建上报；CHAIRMAN_VOTE → 追加一票
-   └ 其他（如同意未过半但有人弃权）→ REJECTED（理由：未达通过阈值）
-7) 未全员投票且未达阈值 → 保持 VOTING，等待后续票或 deadline
-8) 允许「提前通过」（EARLY_PASS，默认关闭）：仅当已投权重使剩余票在数学上无法逆转时才提前 PASS
+【阶段一：投票收集（VOTING）】
+1) 校验：是否在投票期内？投票人是否在快照名单内？是否本轮结论已形成（已形成则拒绝改票）？
+   → 否：抛 VOTE_* 错误
+2) 校验表态合法性：allowAbstain=false 时拒绝 ABSTAIN → VOTE_ABSTAIN_NOT_ALLOWED
+3) 写入票（事务内 + 唯一约束兜底；改票 = 新增行 + 旧行 isReplaced=true）
+4) 重算 A/R/B/Wa/Wr/D/A'/R'/stated
+5) 否决标记：rejectRule 命中 → 置 vetoLocked=true
+   ├ vetoTerminates=false（默认）→ 继续等待全员表态
+   └ vetoTerminates=true         → 立即进入阶段二（未表态者记 SKIPPED）
+6) 表态完成检查：requireAllVote=true 且 stated < N → 保持 VOTING，等待后续票或 deadline
+
+【阶段二：形成系统拟判定（VOTING → PENDING_CONCLUSION）】
+7) 若 vetoLocked → systemDecision = REJECT（一票否决优先，即使 passRule 满足）
+8) 否则按 passRule 判定：
+   ├ 满足           → systemDecision = APPROVE
+   ├ 平票           → tiePolicy：REJECT → REJECT；ESCALATE → 创建上报；CHAIRMAN_VOTE → 追加一票后重算
+   └ 不满足         → systemDecision = REJECT（理由：未达通过阈值）
+9) 写 VoteResult（isProvisional=true）；conclusionStatus=PENDING；通知结论填写人
+   例外：conclusionMode=AUTO 时跳过人工环节，systemDecision 即最终结论
+
+【阶段三：人工结论（PENDING_CONCLUSION → PASSED/REJECTED）】
+10) 结论填写人提交 VoteConclusion：
+    ├ MANUAL_CONFIRM：只能确认 systemDecision；改判需 NODE_CONCLUDE_OVERRIDE 权限 + 必填理由
+    ├ MANUAL_OVERRIDE：可自由改判，仍需必填理由
+    └ 超时未填（默认 24h）→ ESCALATED，交上级部门裁定
+11) 回填 VoteResult 最终判定与 conclusionId，节点进入 PASSED / REJECTED → DONE
+
+（EARLY_PASS「提前通过」默认关闭：本条与「全员必须表态」冲突，仅在不要求全员表态的模板中可启用）
 ```
 
 **仅提醒型超时**（`REMIND_ONLY`）不终结节点：重置新 `deadline` 并再次投递 `vote.timeout`，直到 `maxRemindRounds`（默认 3）后强制转 `ESCALATE`，避免节点永久悬挂。
@@ -362,13 +416,17 @@ PENDING ──submit──▶ SUBMITTED ──accept──▶ ACCEPTED ─┬─
 
 ```jsonc
 {
-  "counts": { "approve": 3, "reject": 1, "abstain": 1 },
+  "counts": { "approve": 3, "reject": 1, "abstain": 0 },
+  "stated": 4,
+  "expectedVoters": 4,
   "weighted": { "approve": 5, "reject": 2, "total": 9 },
   "denominator": 4,
-  "abstainPolicy": "EXCLUDE_FROM_DENOMINATOR",
+  "allowAbstain": false,
   "passRule": "RATIO", "passThreshold": 0.6, "passSatisfied": true,
-  "rejectRule": "ANY_VETO", "rejectSatisfied": false,
-  "passed": true,
+  "rejectRule": "ANY_VETO", "rejectSatisfied": false, "vetoLocked": false,
+  "systemDecision": "APPROVE",
+  "finalDecision": "APPROVE",
+  "conclusionId": 88, "conclusionMode": "MANUAL_CONFIRM", "conclusionIsOverride": false,
   "voters": [ { "userId": 7, "decision": "APPROVE", "weight": 2, "voteId": 101, "at": "..." } ],
   "ruleVersion": "v1.3", "engineVersion": "tally-1.0.0", "evaluatedAt": "..."
 }
@@ -431,7 +489,7 @@ Value     := Literal | { "$path": Path }            // 支持与另一字段比�
 | 校验 | 模板发布前用 `validateRule()` 静态校验（未知 OP、路径不在白名单、类型不匹配、缺必填阈值） |
 | 可扩展 | OP 注册表（`Map<string, ComparatorFn>`），新增操作符无需改求值器主体 → 对应输出要求 #14「如何扩展」 |
 
-### 9.4 DSL 的四处应用
+### 9.4 DSL 的五处应用
 
 | 场景 | 字段 | 命中后果 |
 | --- | --- | --- |
@@ -439,6 +497,7 @@ Value     := Literal | { "$path": Path }            // 支持与另一字段比�
 | 上报触发 | `NodeEscalationRule.triggerType + condition` | 创建 `Escalation` |
 | 任务分配 | `NodeTaskTemplate.assigneeRule`（内含条件） | 解析出 `OWNER / ACCEPTOR` |
 | 超时策略 | `NodeVoteRule.timeoutPolicy + 条件` | 决定自动通过 / 自动驳回 / 上报 |
+| 结论填写人 | `NodeVoteRule.conclusionAuthorRule` | 解析出本层投票结论的填写人 |
 
 ## 10. 索引与性能计划
 
@@ -469,6 +528,32 @@ Value     := Literal | { "$path": Path }            // 支持与另一字段比�
 | 队列隔离 | 任务 payload 带 `tenantId`；Worker 消费时重建 `RequestContext` |
 | 升级路径 | 若未来需要物理隔离，可在 `PrismaService` 层按 `tenantId` 路由到不同 `DATABASE_URL`（连接池映射），业务代码不变 |
 
+### 11.1 投票明细可见性解析（对应澄清项 Q1 / Q21）
+
+可见性不是简单的角色判断，而是**每次查询都要按「查询者 → 投票人」的部门关系逐条投影**。解析顺序如下（命中即返回，`VoteVisibilityPolicy` 纯函数，前后端共用）：
+
+| 优先级 | 条件 | 结果 |
+| --- | --- | --- |
+| 1 | 系统管理员 / 审计者（`AUDIT_EXPORT` 或 `TENANT` 数据范围） | 全部明细 |
+| 2 | 查询者在**该实例上报链**的上级部门内（`EscalationChain.deptId` ∈ 其部门，且 chain 状态 ≥ `SUBMITTED`） | **全部明细**（用户明确要求：上级部门能看到所有上报的） |
+| 3 | 查询者本人是该层投票人 | **本部门明细**（含姓名与选择）+ 其他部门的聚合计数 |
+| 4 | 查询者属于发起部门且具 `VOTE_VIEW_DEPT` | 本部门明细 + 聚合计数 |
+| 5 | 其他任何用户 | 仅聚合计数（已表态 N/M、同意数、反对数），**不含任何姓名** |
+
+返回结构固定为三段，避免前端各自拼装导致越权泄漏：
+
+| 字段 | 内容 | 受策略影响 |
+| --- | --- | --- |
+| `progress` | 已表态数 / 应表态数、同意数、反对数 | 始终可见 |
+| `deptBreakdown[]` | 按部门分组的「已表态 N/M」 | 始终可见（只有计数，无线索到人） |
+| `voters[]` | 投票人姓名、选择、时间、权重 | 按上表策略过滤或整体置空 |
+
+配套约束：
+
+- `recordMode = ANONYMOUS` 时，`voters[]` 只返回 `{ votedAt, weight }`，不返回 `userId/name/decision`，但**计票仍然照常**（匿名只影响展示，不影响判定）。
+- 任何可见性过滤都在**服务端投影层**完成；前端不做隐藏式"假过滤"（前端只负责渲染服务端返回的 `voters[]`）。
+- 每次查看他人投票明细写一条 `AuditLog(action=VOTE_DETAIL_VIEW)`，便于合规审计。
+
 ## 12. 模型增补建议汇总（需用户确认）
 
 | # | 建议 | 原因 | 影响 |
@@ -485,5 +570,11 @@ Value     := Literal | { "$path": Path }            // 支持与另一字段比�
 | 10 | `OutboxEvent` 增加 `aggregateType/aggregateId/sequence/lockedAt` | 保序 + 多实例安全取件 | 防止同一聚合事件乱序导致状态回退 |
 | 11 | 新增 `NumberSequence` | 实例号 / 任务号 / 上报号需要 | 单机部署也需不重复单号 |
 | 12 | 新增 `IdempotencyKey` | 客户端重试与队列重复消费 | 计票与创建任务天然幂等 |
+| 13 | 新增 `VoteConclusion` 表 | 每层**人工投票结论**落地（用户新增需求） | 阶段 1 建表，阶段 2 实现结论服务 |
+| 14 | `InstanceNodeStatus` 增加 `PENDING_CONCLUSION` | 「全员表态 → 人工结论」阶段不可省 | 阶段 2 状态机与前端步骤条 |
+| 15 | `NodeVoteRule` 增加 `requireAllVote / allowAbstain / revotePolicy / vetoTerminates / conclusionMode / conclusionAuthorRule / viewScope / remindIntervalHours / maxRemindRounds` | 承载「必须表态」「结论前可改票」「可见性按部门」「结论人工填写」四条规则 | 阶段 1 字段 + 阶段 2 引擎 |
+| 16 | `Tenant` 增加 `allowCrossLevel / allowAutoApprove` 开关 | 越级与超时自动通过默认关闭，保留合规出口 | 阶段 1 字段；阶段 3 生效 |
+| 17 | `EscalationChain` 增加可见性用途的 `deptId` 索引 | 上级部门查全部投票明细需按链上部门反查 | 阶段 1 索引 |
+| 18 | `Comment` / `Attachment` 支持挂载到 `VoteConclusion` | 结论需要附证明材料 | 多态挂载已支持，无需新表 |
 
-以上 12 条建议默认全部采纳；如需删减请指出编号，我将在阶段 1 调整 schema。
+以上 18 条建议默认全部采纳；如需删减请指出编号，我将在阶段 1 调整 schema。
