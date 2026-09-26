@@ -47,6 +47,26 @@ pnpm --filter @oa/api test:e2e
 全链路覆盖：登录 → 组织/工号 → 模板 → 发起（真库解析并快照投票人）→ 全员表态 →
 人工结论 → 开启下一层 → 跨部门可见性（B1/B2）→ 定局停留态 → 金额超限条件上报。
 
+### 在生产服务器上跑（推荐）
+
+数据库（Docker 里的 PostgreSQL）只在服务器本地监听，所以在服务器上跑最省事，
+`DATABASE_URL` 直接用 `127.0.0.1:35432` 即可，不需要隧道、也不用对外开放端口：
+
+```bash
+cd /path/to/CloudRail-OA
+pnpm install
+
+# .env 里 DATABASE_URL=postgresql://<user>:<password>@127.0.0.1:35432/oa?schema=public&sslmode=disable
+pnpm --filter @oa/api exec prisma migrate deploy   # 应用迁移（含部分索引那一条）
+pnpm --filter @oa/api db:seed                      # 幂等种子（已灌过可跳过）
+
+pnpm --filter @oa/api build
+pnpm --filter @oa/api test:e2e                     # 会起 127.0.0.1:3099 的服务再跑用例
+```
+
+> 跑 e2e 会在演示租户写入两条流程数据（实例 + 投票 + 结论 + 上报单），属预期。
+> 结束后想清理，按 `code` 前缀 `OA-` / `ES-` 删除对应记录即可。
+
 ## 目录约定
 
 | 目录 | 职责 |
