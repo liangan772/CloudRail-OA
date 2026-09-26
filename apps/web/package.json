@@ -12,10 +12,13 @@
   "dependencies": {
     "@oa/shared": "workspace:*",
     "clsx": "^2.1.1",
+    "framer-motion": "^11",
     "lucide-react": "^0.446.0",
     "next": "14.2.15",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "recharts": "^2",
+    "sonner": "^1",
     "swr": "^2.2.5",
     "tailwind-merge": "^2.5.2",
     "zod": "^3.23.8"

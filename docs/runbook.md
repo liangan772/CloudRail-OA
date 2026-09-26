@@ -35,6 +35,10 @@ docker compose --env-file .env -f docker/docker-compose.prod.yml up -d --build
 #    只跑迁移不跑这一步，登录会返回 AUTH_INVALID_CREDENTIALS（detail 为"租户不存在或已停用"）。
 docker compose --env-file .env -f docker/docker-compose.prod.yml exec api pnpm db:seed
 
+# 从旧版本升级（新增了 SYS_MONITOR 权限点）时也必须重跑一次 db:seed：
+# 权限点由代码定义、由种子写入库，不重跑的话管理后台的「运维监控」入口不会出现。
+# 种子是幂等的（角色权限先清后建），重复执行安全。
+
 # 若上面报 "tsx: not found"（Prisma 的 seed 包装器在某些环境找不到 tsx），直接跑脚本：
 # docker compose --env-file .env -f docker/docker-compose.prod.yml exec api \
 #   pnpm --filter @oa/api exec tsx prisma/seed/index.ts

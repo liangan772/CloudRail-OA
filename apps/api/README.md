@@ -97,6 +97,34 @@ pnpm --filter @oa/api test:e2e                     # 会起 127.0.0.1:3099 的�
 | `src/common/**` | 错误、过滤器、拦截器、管道、装饰器、请求上下文 |
 | `test/e2e/**` | 真实库端到端测试与编排脚本 |
 
+## 管理后台（`/admin/**`）
+
+`modules/admin` 是给管理员用的读写管理台，与 `modules/org` 的分工是：
+
+| | `org` | `admin` |
+| --- | --- | --- |
+| 面向 | 所有登录用户（部门/人员选择器） | 管理员 |
+| 放行方式 | 数据范围守卫裁剪 | `@RequirePermissions` 权限点 |
+| 能力 | 只读 | 读写 |
+
+| 控制器 | 前缀 | 权限点 | 能力 |
+| --- | --- | --- | --- |
+| `AdminUserController` | `admin/users` | `USER_MANAGE` | 列表 / 详情 / 新建 / 更新 / 重置密码 / 分配角色 |
+| `AdminRoleController` | `admin/roles` | `ROLE_MANAGE`（`options` 额外放行 `USER_MANAGE`） | 列表 / 详情 / 新建 / 更新 / 权限整表替换 / 删除 / 权限目录 |
+| `AdminOrgController` | `admin/departments`、`admin/worknos` | `ORG_MANAGE`、`DEPT_WORKNO_MANAGE` | 部门 CRUD 与移动、工号设置、工号成员增删与主责人 |
+| `AdminAuditController` | `admin/audit` | `AUDIT_READ`（导出需 `AUDIT_EXPORT`） | 列表 / 详情 / 筛选项字典 / CSV 导出 |
+| `AdminOpsController` | `admin/ops` | `SYS_MONITOR`、`AUDIT_READ` | 业务概览 / 运行态 / 发件箱列表 / 人工重放 / 立即派发 |
+
+三个实现上的注意点：
+
+1. **权限点只能分配、不能新建**。权限点由 `packages/shared` 的 `PERMISSIONS` 定义，服务层会校验传入的 code 是否存在，
+   否则库里会出现前端 `can()` 永远为 false 的"幽灵权限"。
+2. **审计表主键是 BigInt**，不能直接 `JSON.stringify`，对外一律转字符串（`admin-audit.service.ts` 的 `toView`）。
+3. **部门移动会重写整棵子树的物化路径**（`admin-org.service.ts#moveDepartment`），并拒绝把部门移到自己或自己的后代下。
+
+所有写操作都在 `runInTransaction` 内调用 `DomainEventService.emit`，同事务落 `AuditLog` + `OutboxEvent`（C9）。
+`DomainEventService.aggregateType` 因此扩展了 `USER / ROLE / DEPARTMENT / WORKNO / SYSTEM` 五种聚合类型。
+
 ## 实时通道与后台任务
 
 ### Socket.IO（`/ws` 命名空间）

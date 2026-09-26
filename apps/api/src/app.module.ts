@@ -12,6 +12,7 @@ import { EscalationModule } from './modules/escalation/escalation.module';
 import { TaskModule } from './modules/task/task.module';
 import { JobsModule } from './modules/jobs/jobs.module';
 import { NotificationModule } from './modules/notification/notification.module';
+import { AdminModule } from './modules/admin/admin.module';
 import { GatewayModule } from './gateway/gateway.module';
 import { OutboxModule } from './infra/outbox/outbox.module';
 import { HealthController } from './modules/health/health.controller';
@@ -36,6 +37,8 @@ import { DataScopeGuard } from './modules/auth/guards/data-scope.guard';
     TaskModule,
     JobsModule,
     NotificationModule,
+    // 管理后台（用户 / 角色权限 / 组织工号 / 审计 / 运维）
+    AdminModule,
     GatewayModule,
   ],
   controllers: [HealthController],

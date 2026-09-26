@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { VOTER_STATUS_LABEL } from '@oa/shared';
 import { Modal } from '@/components/ui/modal';
+import { toast } from '@/components/ui/toast';
 import { api, ApiError } from '@/lib/api-client';
 import { useSession } from '@/lib/session';
 
@@ -35,14 +36,18 @@ export function VoteActions({
   const [absentOpen, setAbsentOpen] = useState(false);
   const [conclusionOpen, setConclusionOpen] = useState(false);
 
-  const run = async (action: () => Promise<unknown>) => {
+  const run = async (action: () => Promise<unknown>, successMessage: string) => {
     setBusy(true);
     setError(null);
     try {
       await action();
+      // 成功走全局 Toast（不打断视线），失败留在按钮旁边内联显示（用户正看着这里）
+      toast.success(successMessage);
       await onDone();
     } catch (err) {
-      setError(err instanceof ApiError ? `${err.message}${err.detail ? `（${err.detail}）` : ''}` : '操作失败');
+      const message = err instanceof ApiError ? `${err.message}${err.detail ? `（${err.detail}）` : ''}` : '操作失败';
+      setError(message);
+      toast.error(message);
     } finally {
       setBusy(false);
     }
@@ -57,14 +62,14 @@ export function VoteActions({
       <div className="flex flex-wrap items-center gap-2">
         {canVote ? (
           <>
-            <button type="button" className="oa-button" disabled={busy} onClick={() => void run(() => api.post(`/instances/${instanceId}/votes`, { decision: 'APPROVE' }))}>
+            <button type="button" className="oa-button" disabled={busy} onClick={() => void run(() => api.post(`/instances/${instanceId}/votes`, { decision: 'APPROVE' }), '已投同意票')}>
               同意
             </button>
             <button
               type="button"
               className="oa-button-ghost"
               disabled={busy}
-              onClick={() => void run(() => api.post(`/instances/${instanceId}/votes`, { decision: 'REJECT', comment: '不同意' }))}
+              onClick={() => void run(() => api.post(`/instances/${instanceId}/votes`, { decision: 'REJECT', comment: '不同意' }), '已投反对票')}
             >
               反对
             </button>
@@ -97,7 +102,7 @@ export function VoteActions({
         voters={voters}
         onClose={() => setAbsentOpen(false)}
         onSubmit={async (userIds, reason) => {
-          await run(() => api.post(`/instances/${instanceId}/absent`, { userIds, reason, source: 'MANUAL' }));
+          await run(() => api.post(`/instances/${instanceId}/absent`, { userIds, reason, source: 'MANUAL' }), '已标记缺席');
           setAbsentOpen(false);
         }}
       />
@@ -105,7 +110,7 @@ export function VoteActions({
         open={conclusionOpen}
         onClose={() => setConclusionOpen(false)}
         onSubmit={async (decision, content, overrideReason) => {
-          await run(() => api.post(`/instances/${instanceId}/conclusion`, { decision, content, overrideReason }));
+          await run(() => api.post(`/instances/${instanceId}/conclusion`, { decision, content, overrideReason }), '结论已提交');
           setConclusionOpen(false);
         }}
       />
@@ -223,7 +228,7 @@ function ConclusionModal({
         </div>
         <label className="block space-y-1">
           <span className="text-sm">结论意见（必填）</span>
-          <textarea className="oa-input h-24 py-2" value={content} onChange={(event) => setContent(event.target.value)} maxLength={4000} />
+          <textarea className="oa-textarea h-24" value={content} onChange={(event) => setContent(event.target.value)} maxLength={4000} />
         </label>
         <label className="block space-y-1">
           <span className="text-sm">改判理由（与系统拟判定不一致时必填）</span>

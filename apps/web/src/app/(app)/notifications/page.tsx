@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { NOTIFICATION_TYPE_LABEL } from '@oa/shared';
 import { PageHeader } from '@/components/ui/page-header';
 import { EmptyState } from '@/components/ui/empty-state';
+import { Skeleton } from '@/components/ui/skeleton';
 import { api } from '@/lib/api-client';
 import { cn } from '@/lib/cn';
 
@@ -59,7 +60,14 @@ export default function NotificationsPage() {
 
       <div className="oa-card p-0">
         {isLoading ? (
-          <div className="py-10 text-center text-sm text-muted-foreground">加载中…</div>
+          <div className="space-y-4 p-4">
+            {Array.from({ length: 5 }).map((_, index) => (
+              <div key={index} className="space-y-2">
+                <Skeleton className="h-3.5 w-1/3" />
+                <Skeleton className="h-3 w-2/3" />
+              </div>
+            ))}
+          </div>
         ) : (data?.items.length ?? 0) === 0 ? (
           <EmptyState title="没有通知" description="投票、任务与上报的处理提醒会出现在这里。" />
         ) : (

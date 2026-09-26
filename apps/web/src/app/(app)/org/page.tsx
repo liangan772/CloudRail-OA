@@ -3,6 +3,7 @@
 import useSWR from 'swr';
 import { PageHeader } from '@/components/ui/page-header';
 import { DataTable, type Column } from '@/components/ui/data-table';
+import { Skeleton } from '@/components/ui/skeleton';
 
 interface DeptNode {
   id: number;
@@ -53,7 +54,11 @@ export default function OrgPage() {
         <div className="oa-card">
           <h2 className="mb-2 text-sm font-medium">部门树</h2>
           {isLoading ? (
-            <p className="text-sm text-muted-foreground">加载中…</p>
+            <div className="space-y-2">
+              {Array.from({ length: 6 }).map((_, index) => (
+                <Skeleton key={index} className="h-4" style={{ width: `${90 - index * 8}%` }} />
+              ))}
+            </div>
           ) : (
             <DeptTree nodes={tree ?? []} />
           )}

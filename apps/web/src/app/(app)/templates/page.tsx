@@ -8,6 +8,7 @@ import { PageHeader } from '@/components/ui/page-header';
 import { DataTable, type Column } from '@/components/ui/data-table';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { Modal } from '@/components/ui/modal';
+import { Skeleton } from '@/components/ui/skeleton';
 import { api, ApiError } from '@/lib/api-client';
 import { useSession } from '@/lib/session';
 
@@ -169,7 +170,11 @@ export default function TemplatesPage() {
             </div>
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">加载中…</p>
+          <div className="space-y-3">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <Skeleton key={index} className="h-4 w-full" />
+            ))}
+          </div>
         )}
       </Modal>
     </>

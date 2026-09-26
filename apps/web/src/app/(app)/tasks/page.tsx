@@ -9,6 +9,7 @@ import { DataTable, type Column } from '@/components/ui/data-table';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { Pagination } from '@/components/ui/pagination';
 import { Modal } from '@/components/ui/modal';
+import { Skeleton } from '@/components/ui/skeleton';
 import { TaskActions, type TaskDetail } from '@/components/business/task-actions';
 
 interface TaskRow {
@@ -155,7 +156,11 @@ export default function TasksPage() {
             </div>
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">加载中…</p>
+          <div className="space-y-3">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <Skeleton key={index} className="h-4 w-full" />
+            ))}
+          </div>
         )}
       </Modal>
     </>

@@ -6,6 +6,7 @@ import { INSTANCE_NODE_STATUS_LABEL, INSTANCE_STATUS_LABEL, VOTER_STATUS_LABEL }
 import { PageHeader } from '@/components/ui/page-header';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { VoteProgressBar } from '@/components/ui/progress-bar';
+import { Skeleton } from '@/components/ui/skeleton';
 import { VoteActions } from '@/components/business/vote-actions';
 
 interface NodeVoter {
@@ -65,7 +66,20 @@ export default function InstanceDetailPage() {
   const { data: detail } = useSWR<InstanceDetail>(detailKey);
   const { data: progress } = useSWR<ProgressDetail>(progressKey);
 
-  if (!detail) return <div className="py-10 text-center text-sm text-muted-foreground">加载中…</div>;
+  if (!detail)
+    return (
+      <div className="space-y-5">
+        <div className="space-y-2">
+          <Skeleton className="h-4 w-24" />
+          <Skeleton className="h-6 w-64" />
+          <Skeleton className="h-4 w-96" />
+        </div>
+        <div className="grid gap-3 lg:grid-cols-[2fr_1fr]">
+          <Skeleton className="h-72 w-full rounded-lg" />
+          <Skeleton className="h-72 w-full rounded-lg" />
+        </div>
+      </div>
+    );
 
   const currentNode = detail.nodes.find((node) => node.id === detail.currentNodeId) ?? detail.nodes[detail.nodes.length - 1];
 

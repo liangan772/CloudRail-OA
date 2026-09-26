@@ -20,7 +20,11 @@ export interface DomainEventInput {
   tenantId: number;
   /** 事件名，取自 shared 的 `WS_EVENTS`（前后端同一份常量） */
   eventType: string;
-  aggregateType: 'INSTANCE' | 'NODE' | 'TASK' | 'ESCALATION';
+  /**
+   * 聚合根类型。前四种是业务流程聚合；后几种是管理后台的配置聚合
+   * （用户 / 角色 / 部门 / 工号 / 系统运维），它们同样必须留下审计。
+   */
+  aggregateType: 'INSTANCE' | 'NODE' | 'TASK' | 'ESCALATION' | 'USER' | 'ROLE' | 'DEPARTMENT' | 'WORKNO' | 'SYSTEM';
   aggregateId: number | string;
   payload?: Record<string, unknown>;
   /** 广播房间，取自 shared 的 `WS_ROOMS` */

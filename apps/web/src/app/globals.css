@@ -4,69 +4,401 @@
 
 /**
  * 语义 token（HSL 分量，便于 tailwind 的 hsl(var(--x)) 拼接）。
+ *
+ * 分层约定（决定视觉层次，改这里就能整体换肤）：
+ *   --background  页面底色（浅灰，让卡片浮起来）
+ *   --card        卡片/面板底色（纯白）
+ *   --surface     卡片**内部**的次级面板（比 card 略深，用于表头、代码块、内嵌区）
+ *   --muted       悬停/选中底色
+ *   --primary-subtle 主色浅底（导航激活、标签底）
+ *
  * 状态色与 packages/shared 的 STATUS_TONE 对应：pending/info/success/warning/danger/muted。
  */
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222 20% 15%;
+    --background: 210 24% 98%;
+    --foreground: 222 24% 13%;
     --card: 0 0% 100%;
-    --card-foreground: 222 20% 15%;
-    --muted: 220 16% 96%;
-    --muted-foreground: 220 10% 45%;
-    --border: 220 14% 90%;
+    --card-foreground: 222 24% 13%;
+    --surface: 210 24% 97%;
+    --muted: 210 18% 94.5%;
+    --muted-foreground: 215 14% 46%;
+    --border: 214 20% 90%;
+    --border-strong: 214 18% 82%;
     --primary: 221 83% 53%;
     --primary-foreground: 0 0% 100%;
+    --primary-subtle: 221 92% 96%;
+    --ring: 221 83% 53%;
+
     --danger: 0 72% 51%;
+    --danger-subtle: 0 86% 97%;
     --warning: 32 95% 44%;
+    --warning-subtle: 40 96% 96%;
     --success: 145 63% 36%;
+    --success-subtle: 145 60% 96%;
     --info: 199 89% 42%;
-    --radius: 10px;
+    --info-subtle: 199 90% 96%;
+
+    /* 图表色板：与主色同源，按序取用 */
+    --chart-1: 221 83% 53%;
+    --chart-2: 199 89% 48%;
+    --chart-3: 262 70% 58%;
+    --chart-4: 32 95% 52%;
+    --chart-5: 145 63% 42%;
+
+    --radius: 12px;
+
+    /* 层级阴影：只用于"浮起"的层（卡片 hover、下拉、弹窗），不做装饰 */
+    --shadow-xs: 0 1px 2px 0 hsl(222 24% 13% / 0.04);
+    --shadow-sm: 0 1px 3px 0 hsl(222 24% 13% / 0.06), 0 1px 2px -1px hsl(222 24% 13% / 0.04);
+    --shadow-md: 0 4px 12px -2px hsl(222 24% 13% / 0.08), 0 2px 6px -2px hsl(222 24% 13% / 0.05);
+    --shadow-lg: 0 12px 32px -8px hsl(222 24% 13% / 0.14), 0 4px 12px -4px hsl(222 24% 13% / 0.06);
+
+    /* 过渡曲线：统一"快出慢入"的手感，避免各处 cubic-bezier 打架 */
+    --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
+    --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
   }
 
   .dark {
-    --background: 222 22% 11%;
+    --background: 222 26% 9%;
     --foreground: 210 20% 96%;
-    --card: 222 20% 14%;
+    --card: 222 22% 12%;
     --card-foreground: 210 20% 96%;
-    --muted: 222 16% 18%;
-    --muted-foreground: 218 12% 65%;
-    --border: 222 14% 24%;
+    --surface: 222 20% 15%;
+    --muted: 222 18% 18%;
+    --muted-foreground: 218 12% 64%;
+    --border: 222 16% 22%;
+    --border-strong: 222 14% 30%;
     --primary: 217 91% 60%;
-    --primary-foreground: 222 22% 11%;
+    --primary-foreground: 222 26% 9%;
+    --primary-subtle: 217 60% 18%;
+    --ring: 217 91% 60%;
+
     --danger: 0 72% 60%;
+    --danger-subtle: 0 40% 18%;
     --warning: 32 95% 55%;
+    --warning-subtle: 32 45% 17%;
     --success: 145 55% 45%;
+    --success-subtle: 145 35% 16%;
     --info: 199 89% 55%;
+    --info-subtle: 199 45% 17%;
+
+    --chart-1: 217 91% 62%;
+    --chart-2: 199 89% 58%;
+    --chart-3: 262 75% 70%;
+    --chart-4: 32 95% 60%;
+    --chart-5: 145 60% 52%;
+
+    --shadow-xs: 0 1px 2px 0 hsl(0 0% 0% / 0.3);
+    --shadow-sm: 0 1px 3px 0 hsl(0 0% 0% / 0.4), 0 1px 2px -1px hsl(0 0% 0% / 0.3);
+    --shadow-md: 0 4px 12px -2px hsl(0 0% 0% / 0.45), 0 2px 6px -2px hsl(0 0% 0% / 0.3);
+    --shadow-lg: 0 12px 32px -8px hsl(0 0% 0% / 0.55), 0 4px 12px -4px hsl(0 0% 0% / 0.35);
   }
 
   * {
     @apply border-border;
   }
 
+  html {
+    /* 侧边栏滚动与页面滚动分开时，避免整页跟着跳 */
+    scroll-behavior: smooth;
+  }
+
   body {
     @apply bg-background text-foreground antialiased;
+    font-family:
+      system-ui,
+      -apple-system,
+      'Segoe UI',
+      'PingFang SC',
+      'Hiragino Sans GB',
+      'Microsoft YaHei',
+      'Noto Sans SC',
+      sans-serif;
+    /* 中文正文用 14px 基准，行高略放宽，长段落更好读 */
+    font-size: 14px;
+    line-height: 1.65;
+    font-feature-settings: 'tnum' 1;
+  }
+
+  /* 键盘可达性：只在键盘聚焦时出环，鼠标点击不出 */
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring) / 0.55);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.18);
+  }
+
+  /* 滚动条：细、无轨道、hover 才明显，避免抢视觉 */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border-strong)) transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--border-strong) / 0.6);
+    border-radius: 9999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--border-strong));
+    background-clip: content-box;
+  }
+
+  /* 表格里的数字统一等宽对齐，方便纵向比对 */
+  .tabular {
+    font-variant-numeric: tabular-nums;
   }
 }
 
 @layer components {
+  /* ---------- 容器 ---------- */
+
   .oa-card {
-    @apply rounded-lg border bg-card p-4 shadow-sm;
+    @apply rounded-lg border bg-card shadow-[var(--shadow-xs)];
   }
+
+  /* 卡片内边距交给使用方，避免"有的卡片要贴边表格"这种场景被迫 override */
+  .oa-card-pad {
+    @apply p-4 lg:p-5;
+  }
+
+  /* 可点击卡片：hover 轻微抬起 + 描边加深，给出可点暗示 */
+  .oa-card-interactive {
+    @apply transition-all duration-200 ease-[var(--ease-out-quint)] hover:-translate-y-0.5
+      hover:border-[hsl(var(--border-strong))] hover:shadow-[var(--shadow-md)];
+  }
+
+  /* 卡片内的次级面板（表头、内嵌区块） */
+  .oa-surface {
+    @apply rounded-md border bg-[hsl(var(--surface))];
+  }
+
+  /* 卡片标题区：统一"标题 + 说明 + 右侧操作"的排布 */
+  .oa-card-header {
+    @apply flex items-start justify-between gap-3 border-b px-4 py-3 lg:px-5;
+  }
+
+  /* ---------- 表单 ---------- */
 
   .oa-input {
-    @apply h-9 w-full rounded-md border bg-background px-3 text-sm outline-none
-      focus:ring-2 focus:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-60;
+    @apply h-9 w-full rounded-md border bg-card px-3 text-sm outline-none transition
+      placeholder:text-muted-foreground/70
+      focus:border-primary focus:ring-2 focus:ring-primary/25
+      disabled:cursor-not-allowed disabled:bg-muted disabled:opacity-60;
   }
 
+  .oa-textarea {
+    @apply min-h-[80px] w-full rounded-md border bg-card px-3 py-2 text-sm outline-none transition
+      placeholder:text-muted-foreground/70
+      focus:border-primary focus:ring-2 focus:ring-primary/25
+      disabled:cursor-not-allowed disabled:bg-muted disabled:opacity-60;
+  }
+
+  .oa-label {
+    @apply mb-1.5 block text-xs font-medium text-muted-foreground;
+  }
+
+  .oa-field-error {
+    @apply mt-1 text-xs text-danger;
+  }
+
+  /* ---------- 按钮 ---------- */
+
   .oa-button {
-    @apply inline-flex h-9 items-center justify-center gap-1.5 rounded-md bg-primary px-4
-      text-sm font-medium text-primary-foreground transition hover:opacity-90
-      disabled:cursor-not-allowed disabled:opacity-60;
+    @apply inline-flex h-9 select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-md
+      bg-primary px-4 text-sm font-medium text-primary-foreground
+      shadow-[var(--shadow-xs)] transition-all duration-150 ease-[var(--ease-out-quint)]
+      hover:brightness-[1.06] active:scale-[0.98]
+      disabled:pointer-events-none disabled:opacity-50;
+  }
+
+  .oa-button-secondary {
+    @apply inline-flex h-9 select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-md
+      border bg-card px-4 text-sm font-medium text-foreground
+      shadow-[var(--shadow-xs)] transition-all duration-150 ease-[var(--ease-out-quint)]
+      hover:bg-muted hover:border-[hsl(var(--border-strong))] active:scale-[0.98]
+      disabled:pointer-events-none disabled:opacity-50;
   }
 
   .oa-button-ghost {
-    @apply inline-flex h-9 items-center justify-center gap-1.5 rounded-md border bg-card px-3
-      text-sm transition hover:bg-muted;
+    @apply inline-flex h-9 select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-md
+      px-3 text-sm font-medium transition-all duration-150 ease-[var(--ease-out-quint)]
+      hover:bg-muted active:scale-[0.98]
+      disabled:pointer-events-none disabled:opacity-50;
+  }
+
+  .oa-button-danger {
+    @apply inline-flex h-9 select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-md
+      bg-danger px-4 text-sm font-medium text-white
+      shadow-[var(--shadow-xs)] transition-all duration-150 ease-[var(--ease-out-quint)]
+      hover:brightness-[1.06] active:scale-[0.98]
+      disabled:pointer-events-none disabled:opacity-50;
+  }
+
+  /* 图标按钮：方形、无文字 */
+  .oa-icon-button {
+    @apply inline-flex h-8 w-8 select-none items-center justify-center rounded-md
+      text-muted-foreground transition-all duration-150
+      hover:bg-muted hover:text-foreground active:scale-95
+      disabled:pointer-events-none disabled:opacity-50;
+  }
+
+  /* ---------- 其它 ---------- */
+
+  .oa-chip {
+    @apply inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium;
+  }
+
+  .oa-divider {
+    @apply h-px w-full bg-border;
+  }
+
+  /* 骨架屏：微光扫过，比纯 pulse 更"活"，但仍是低对比不抢眼 */
+  .oa-skeleton {
+    @apply relative overflow-hidden rounded-md bg-muted;
+  }
+
+  .oa-skeleton::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, hsl(var(--card) / 0.7), transparent);
+    animation: oa-shimmer 1.6s infinite;
+  }
+
+  /* 长文本截断 */
+  .oa-truncate-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+}
+
+@layer utilities {
+  /* 只在需要时开启硬件加速，避免全站乱用 */
+  .oa-gpu {
+    transform: translateZ(0);
+    will-change: transform;
+  }
+
+  .oa-scroll-area {
+    @apply overflow-y-auto overscroll-contain;
+  }
+}
+
+/* ---------- 动效 ---------- */
+
+@keyframes oa-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes oa-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes oa-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes oa-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes oa-slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes oa-pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 hsl(var(--primary) / 0.45);
+  }
+  70% {
+    box-shadow: 0 0 0 6px hsl(var(--primary) / 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 hsl(var(--primary) / 0);
+  }
+}
+
+.oa-animate-fade-in {
+  animation: oa-fade-in 0.24s var(--ease-out-quint) both;
+}
+
+.oa-animate-fade-up {
+  animation: oa-fade-up 0.28s var(--ease-out-quint) both;
+}
+
+.oa-animate-scale-in {
+  animation: oa-scale-in 0.2s var(--ease-out-quint) both;
+}
+
+.oa-animate-slide-in-right {
+  animation: oa-slide-in-right 0.24s var(--ease-out-quint) both;
+}
+
+.oa-animate-pulse-ring {
+  animation: oa-pulse-ring 2s infinite;
+}
+
+/* 列表逐项进场：用 inline style 传 --oa-index，形成轻微错峰 */
+.oa-stagger {
+  animation: oa-fade-up 0.3s var(--ease-out-quint) both;
+  animation-delay: calc(var(--oa-index, 0) * 30ms);
+}
+
+/* 尊重系统"减少动态效果"设置 —— 这是可达性要求，不是可选优化 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

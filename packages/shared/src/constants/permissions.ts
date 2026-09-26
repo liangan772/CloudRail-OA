@@ -21,6 +21,7 @@ export const PERMISSIONS: readonly PermissionDef[] = [
   P('ROLE_MANAGE', '角色权限管理', 'system', PermissionType.MENU),
   P('USER_MANAGE', '用户管理', 'system'),
   P('DEPT_WORKNO_MANAGE', '部门工号维护', 'system'),
+  P('SYS_MONITOR', '系统监控与运维', 'system', PermissionType.MENU),
   // 流程模板
   P('WF_DESIGN', '流程设计器', 'workflow', PermissionType.MENU),
   P('WF_PUBLISH', '流程模板发布', 'workflow'),

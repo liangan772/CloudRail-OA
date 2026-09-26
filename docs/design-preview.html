@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CloudRail OA · 设计系统预览（阶段 7）</title>
+<style>
+  :root{
+    --background:210 24% 98%; --foreground:222 24% 13%; --card:0 0% 100%;
+    --surface:210 24% 97%; --muted:210 18% 94.5%; --muted-foreground:215 14% 46%;
+    --border:214 20% 90%; --border-strong:214 18% 82%;
+    --primary:221 83% 53%; --primary-foreground:0 0% 100%; --primary-subtle:221 92% 96%;
+    --danger:0 72% 51%; --danger-subtle:0 86% 97%;
+    --warning:32 95% 44%; --warning-subtle:40 96% 96%;
+    --success:145 63% 36%; --success-subtle:145 60% 96%;
+    --info:199 89% 42%; --info-subtle:199 90% 96%;
+    --chart-1:221 83% 53%; --chart-2:199 89% 48%; --chart-3:262 70% 58%;
+    --chart-4:32 95% 52%; --chart-5:145 63% 42%;
+    --radius:12px;
+    --shadow-xs:0 1px 2px 0 hsl(222 24% 13% / .04);
+    --shadow-sm:0 1px 3px 0 hsl(222 24% 13% / .06),0 1px 2px -1px hsl(222 24% 13% / .04);
+    --shadow-md:0 4px 12px -2px hsl(222 24% 13% / .08),0 2px 6px -2px hsl(222 24% 13% / .05);
+    --shadow-lg:0 12px 32px -8px hsl(222 24% 13% / .14),0 4px 12px -4px hsl(222 24% 13% / .06);
+    --ease:cubic-bezier(.22,1,.36,1);
+  }
+  html.dark{
+    --background:222 26% 9%; --foreground:210 20% 96%; --card:222 22% 12%;
+    --surface:222 20% 15%; --muted:222 18% 18%; --muted-foreground:218 12% 64%;
+    --border:222 16% 22%; --border-strong:222 14% 30%;
+    --primary:217 91% 60%; --primary-foreground:222 26% 9%; --primary-subtle:217 60% 18%;
+    --danger:0 72% 60%; --danger-subtle:0 40% 18%;
+    --warning:32 95% 55%; --warning-subtle:32 45% 17%;
+    --success:145 55% 45%; --success-subtle:145 35% 16%;
+    --info:199 89% 55%; --info-subtle:199 45% 17%;
+    --shadow-xs:0 1px 2px 0 hsl(0 0% 0% / .3);
+    --shadow-sm:0 1px 3px 0 hsl(0 0% 0% / .4),0 1px 2px -1px hsl(0 0% 0% / .3);
+    --shadow-md:0 4px 12px -2px hsl(0 0% 0% / .45),0 2px 6px -2px hsl(0 0% 0% / .3);
+    --shadow-lg:0 12px 32px -8px hsl(0 0% 0% / .55),0 4px 12px -4px hsl(0 0% 0% / .35);
+  }
+  *{box-sizing:border-box;border-color:hsl(var(--border))}
+  body{margin:0;background:hsl(var(--background));color:hsl(var(--foreground));
+    font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    font-size:14px;line-height:1.65;font-feature-settings:"tnum" 1;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1080px;margin:0 auto;padding:32px 24px 72px}
+  h1{font-size:22px;font-weight:600;margin:0 0 6px;letter-spacing:-.01em}
+  h2{font-size:14px;font-weight:500;margin:0 0 12px}
+  h3{font-size:12px;font-weight:500;margin:0 0 8px;color:hsl(var(--muted-foreground))}
+  p.lead{margin:0 0 28px;color:hsl(var(--muted-foreground));font-size:13px}
+  section{margin-bottom:32px}
+  .card{background:hsl(var(--card));border:1px solid hsl(var(--border));border-radius:var(--radius);box-shadow:var(--shadow-xs)}
+  .card-pad{padding:18px}
+  .grid{display:grid;gap:12px}
+  .g2{grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+  .g4{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
+  .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+  .swatch{height:52px;border-radius:8px;border:1px solid hsl(var(--border));display:flex;align-items:flex-end;padding:6px 8px;font-size:11px}
+  .btn{display:inline-flex;height:36px;align-items:center;gap:6px;border-radius:10px;padding:0 16px;font-size:14px;font-weight:500;cursor:pointer;border:1px solid transparent;transition:all .15s var(--ease)}
+  .btn-primary{background:hsl(var(--primary));color:hsl(var(--primary-foreground));box-shadow:var(--shadow-xs)}
+  .btn-primary:hover{filter:brightness(1.06)}
+  .btn-secondary{background:hsl(var(--card));border-color:hsl(var(--border));color:hsl(var(--foreground));box-shadow:var(--shadow-xs)}
+  .btn-secondary:hover{background:hsl(var(--muted))}
+  .btn-ghost{background:transparent;color:hsl(var(--foreground))}
+  .btn-ghost:hover{background:hsl(var(--muted))}
+  .btn-danger{background:hsl(var(--danger));color:#fff}
+  .btn-subtle{background:hsl(var(--primary-subtle));color:hsl(var(--primary))}
+  .badge{display:inline-flex;align-items:center;gap:6px;border-radius:9999px;border:1px solid;padding:2px 8px;font-size:12px;font-weight:500;white-space:nowrap}
+  .badge .dot{width:6px;height:6px;border-radius:9999px;flex:0 0 auto}
+  .b-success{background:hsl(var(--success-subtle));color:hsl(var(--success));border-color:hsl(var(--success)/.2)}
+  .b-info{background:hsl(var(--info-subtle));color:hsl(var(--info));border-color:hsl(var(--info)/.2)}
+  .b-warning{background:hsl(var(--warning-subtle));color:hsl(var(--warning));border-color:hsl(var(--warning)/.2)}
+  .b-danger{background:hsl(var(--danger-subtle));color:hsl(var(--danger));border-color:hsl(var(--danger)/.2)}
+  .b-neutral{background:hsl(var(--muted));color:hsl(var(--muted-foreground));border-color:hsl(var(--border))}
+  .chip{display:inline-flex;align-items:center;gap:4px;border-radius:9999px;border:1px solid hsl(var(--border));background:hsl(var(--muted));color:hsl(var(--muted-foreground));padding:1px 8px;font-size:12px;font-weight:500}
+  .input{height:36px;width:100%;border-radius:10px;border:1px solid hsl(var(--border));background:hsl(var(--card));padding:0 12px;font-size:14px;color:inherit;outline:none}
+  .input:focus{border-color:hsl(var(--primary));box-shadow:0 0 0 3px hsl(var(--primary)/.25)}
+  .stat .lbl{font-size:12px;color:hsl(var(--muted-foreground));font-weight:500}
+  .stat .val{font-size:24px;font-weight:600;margin-top:8px;letter-spacing:-.01em}
+  .stat .hint{font-size:12px;color:hsl(var(--muted-foreground));margin-top:6px}
+  .icon-box{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;font-size:13px}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  thead{background:hsl(var(--surface))}
+  th{text-align:left;font-size:12px;font-weight:500;color:hsl(var(--muted-foreground));padding:8px 12px;box-shadow:inset 0 -1px 0 0 hsl(var(--border))}
+  td{padding:10px 12px;border-bottom:1px solid hsl(var(--border)/.7);vertical-align:top}
+  tr:last-child td{border-bottom:0}
+  tbody tr:hover{background:hsl(var(--muted)/.6)}
+  .bar{height:8px;border-radius:9999px;background:hsl(var(--muted));overflow:hidden;display:flex}
+  .bar span{height:100%}
+  .skel{position:relative;overflow:hidden;border-radius:8px;background:hsl(var(--muted))}
+  .skel::after{content:"";position:absolute;inset:0;transform:translateX(-100%);
+    background:linear-gradient(90deg,transparent,hsl(var(--card)/.7),transparent);animation:sh 1.6s infinite}
+  @keyframes sh{100%{transform:translateX(100%)}}
+  .theme-btn{position:fixed;right:20px;top:20px;z-index:10}
+  .layer{display:flex;gap:10px;flex-wrap:wrap}
+  .layer div{flex:1 1 140px;border-radius:8px;padding:14px 12px;font-size:12px;border:1px solid hsl(var(--border))}
+  .note{font-size:12px;color:hsl(var(--muted-foreground));margin-top:10px}
+</style>
+</head>
+<body>
+<button class="btn btn-secondary theme-btn" onclick="document.documentElement.classList.toggle('dark')">切换明暗</button>
+<div class="wrap">
+  <h1>CloudRail OA · 设计系统预览</h1>
+  <p class="lead">阶段 7 交付的视觉语言。颜色、圆角、阴影全部由 CSS 变量承载（<code>apps/web/src/app/globals.css</code>），组件只引用语义名。</p>
+
+  <section>
+    <h2>1 · 层级与色板</h2>
+    <div class="layer">
+      <div style="background:hsl(var(--background))">background<br><code>页面底</code></div>
+      <div style="background:hsl(var(--surface))">surface<br><code>卡片内嵌</code></div>
+      <div style="background:hsl(var(--card));box-shadow:var(--shadow-xs)">card<br><code>卡片</code></div>
+      <div style="background:hsl(var(--muted))">muted<br><code>悬停/选中</code></div>
+      <div style="background:hsl(var(--primary-subtle))">primary-subtle<br><code>激活态</code></div>
+    </div>
+    <p class="note">层次靠 <code>background &lt; surface &lt; card</code> 的明度差 + 阴影表达，不靠加粗边框。</p>
+    <div class="grid g4" style="margin-top:12px">
+      <div class="swatch" style="background:hsl(var(--primary));color:hsl(var(--primary-foreground))">primary</div>
+      <div class="swatch" style="background:hsl(var(--success));color:#fff">success</div>
+      <div class="swatch" style="background:hsl(var(--warning));color:#fff">warning</div>
+      <div class="swatch" style="background:hsl(var(--danger));color:#fff">danger</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>2 · 按钮</h2>
+    <div class="row">
+      <button class="btn btn-primary">主操作</button>
+      <button class="btn btn-secondary">次操作</button>
+      <button class="btn btn-ghost">弱操作</button>
+      <button class="btn btn-subtle">浅底</button>
+      <button class="btn btn-danger">破坏性</button>
+      <button class="btn btn-secondary" disabled style="opacity:.5;cursor:not-allowed">禁用</button>
+    </div>
+    <p class="note">一屏最多一个 <code>primary</code>；所有按钮都有 <code>active:scale(.98)</code> 的按压反馈。</p>
+  </section>
+
+  <section>
+    <h2>3 · 状态标签</h2>
+    <div class="row">
+      <span class="badge b-success"><span class="dot" style="background:hsl(var(--success))"></span>已通过</span>
+      <span class="badge b-info"><span class="dot" style="background:hsl(var(--info))"></span>投票中</span>
+      <span class="badge b-warning"><span class="dot" style="background:hsl(var(--warning))"></span>待我处理</span>
+      <span class="badge b-danger"><span class="dot" style="background:hsl(var(--danger))"></span>已驳回</span>
+      <span class="badge b-neutral"><span class="dot" style="background:hsl(var(--muted-foreground)/.5)"></span>已归档</span>
+      <span class="chip">角色标签</span>
+    </div>
+    <p class="note">语义色取自 <code>@oa/shared</code> 的 <code>STATUS_TONE</code>；圆点让色觉障碍用户也能靠位置辨认。</p>
+  </section>
+
+  <section>
+    <h2>4 · 表单与焦点环</h2>
+    <div class="grid g2">
+      <div>
+        <h3>输入框（点一下看焦点环）</h3>
+        <input class="input" placeholder="邮箱 / 姓名 / 手机号" />
+        <p class="note">焦点环用 <code>:focus-visible</code>，键盘可达但鼠标点击不出环。</p>
+      </div>
+      <div>
+        <h3>投票进度条</h3>
+        <div class="bar">
+          <span style="width:45%;background:hsl(var(--success))"></span>
+          <span style="width:20%;background:hsl(var(--danger))"></span>
+          <span style="width:35%;background:hsl(var(--warning)/.5)"></span>
+        </div>
+        <div style="font-size:12px;color:hsl(var(--muted-foreground));margin-top:6px">
+          已表态 <b style="color:hsl(var(--foreground))">13/20</b>(65%)　同意 9　反对 4　缺席 2（不计票、不入池）
+        </div>
+        <p class="note">分段宽度带 500ms 过渡，改票时能看到条子平滑移动。</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>5 · 指标卡</h2>
+    <div class="grid g4">
+      <div class="card card-pad stat">
+        <div class="row" style="justify-content:space-between">
+          <span class="lbl">用户</span>
+          <span class="icon-box" style="background:hsl(var(--primary-subtle));color:hsl(var(--primary))">人</span>
+        </div>
+        <div class="val">9</div>
+        <div class="hint">启用 9 · 停用/锁定 0</div>
+      </div>
+      <div class="card card-pad stat">
+        <div class="row" style="justify-content:space-between">
+          <span class="lbl">任务</span>
+          <span class="icon-box" style="background:hsl(var(--danger-subtle));color:hsl(var(--danger))">任</span>
+        </div>
+        <div class="val">14</div>
+        <div class="hint">未完成 6 · 已逾期 2</div>
+      </div>
+      <div class="card card-pad stat">
+        <div class="row" style="justify-content:space-between">
+          <span class="lbl">流程实例</span>
+          <span class="icon-box" style="background:hsl(var(--success-subtle));color:hsl(var(--success))">流</span>
+        </div>
+        <div class="val">23</div>
+        <div class="hint">进行中 5 条</div>
+      </div>
+      <div class="card card-pad stat">
+        <div class="row" style="justify-content:space-between">
+          <span class="lbl">事件投递</span>
+          <span class="icon-box" style="background:hsl(var(--muted));color:hsl(var(--muted-foreground))">事</span>
+        </div>
+        <div class="val">0</div>
+        <div class="hint">模式 queue｜死信 0</div>
+      </div>
+    </div>
+    <p class="note">数值用等宽数字（<code>tabular-nums</code>），多卡并排时位数对齐；悬停轻微抬起。</p>
+  </section>
+
+  <section>
+    <h2>6 · 表格与骨架屏</h2>
+    <div class="card" style="overflow:hidden">
+      <table>
+        <thead><tr><th>用户</th><th>部门 / 职务</th><th>角色</th><th>状态</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><b>张伟</b><div style="font-size:12px;color:hsl(var(--muted-foreground))">admin@cloudrail.dev</div></td>
+            <td>总经理办公室</td>
+            <td><span class="chip">租户管理员</span></td>
+            <td><span class="badge b-success"><span class="dot" style="background:hsl(var(--success))"></span>正常</span></td>
+          </tr>
+          <tr>
+            <td><b>李静</b><div style="font-size:12px;color:hsl(var(--muted-foreground))">lijing@cloudrail.dev</div></td>
+            <td>产品中心<div style="font-size:12px;color:hsl(var(--muted-foreground))">总监</div></td>
+            <td><span class="chip">部门负责人</span></td>
+            <td><span class="badge b-success"><span class="dot" style="background:hsl(var(--success))"></span>正常</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <h3 style="margin-top:16px">加载态（骨架屏，替代原来的"加载中…"文字）</h3>
+    <div class="card card-pad" style="display:grid;gap:12px">
+      <div class="skel" style="height:14px;width:32%"></div>
+      <div class="skel" style="height:14px;width:100%"></div>
+      <div class="skel" style="height:14px;width:66%"></div>
+    </div>
+    <p class="note">骨架保持与真实内容一致的高度，内容到位时页面不跳动；微光扫过比纯 pulse 更有"在加载"的暗示。</p>
+  </section>
+
+  <section>
+    <h2>7 · 管理后台结构</h2>
+    <div class="grid g2">
+      <div class="card card-pad">
+        <h3>侧边栏新增分组</h3>
+        <div style="font-size:12px;color:hsl(var(--muted-foreground));margin-bottom:6px">管理后台</div>
+        <div style="display:grid;gap:4px">
+          <div style="padding:6px 10px;border-radius:8px;background:hsl(var(--primary-subtle));color:hsl(var(--primary));font-weight:500">后台概览</div>
+          <div style="padding:6px 10px;border-radius:8px">用户管理</div>
+          <div style="padding:6px 10px;border-radius:8px">角色权限</div>
+          <div style="padding:6px 10px;border-radius:8px">组织与工号</div>
+          <div style="padding:6px 10px;border-radius:8px">审计日志</div>
+          <div style="padding:6px 10px;border-radius:8px">运维监控</div>
+        </div>
+        <p class="note">激活态用共享 <code>layoutId</code> 的滑块移动，切换有连续感。</p>
+      </div>
+      <div class="card card-pad">
+        <h3>对应后端接口</h3>
+        <table style="font-size:12px">
+          <tbody>
+            <tr><td><code>admin/users</code></td><td>USER_MANAGE</td></tr>
+            <tr><td><code>admin/roles</code></td><td>ROLE_MANAGE</td></tr>
+            <tr><td><code>admin/departments</code></td><td>ORG_MANAGE</td></tr>
+            <tr><td><code>admin/worknos</code></td><td>DEPT_WORKNO_MANAGE</td></tr>
+            <tr><td><code>admin/audit</code></td><td>AUDIT_READ</td></tr>
+            <tr><td><code>admin/ops</code></td><td>SYS_MONITOR</td></tr>
+          </tbody>
+        </table>
+        <p class="note">全部写操作在 <code>runInTransaction</code> 内落 AuditLog + OutboxEvent（约束 C9）。</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>8 · 动效与可达性</h2>
+    <div class="row">
+      <div class="card card-pad" style="flex:1 1 220px">
+        <h3>统一过渡曲线</h3>
+        <code>cubic-bezier(.22, 1, .36, 1)</code>
+        <p class="note">"快出慢入"，全站一套，避免各处缓动打架。</p>
+      </div>
+      <div class="card card-pad" style="flex:1 1 220px">
+        <h3>减少动态效果</h3>
+        <code>prefers-reduced-motion</code>
+        <p class="note">系统开启后所有动画与过渡降到 0.01ms —— 这是可达性要求，不是可选优化。</p>
+      </div>
+      <div class="card card-pad" style="flex:1 1 220px">
+        <h3>键盘可达</h3>
+        <code>:focus-visible</code>
+        <p class="note">表格行、菜单项、弹窗都支持 Tab 与 Esc。</p>
+      </div>
+    </div>
+  </section>
+</div>
+</body>
+</html>

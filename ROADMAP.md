@@ -56,6 +56,21 @@
 | 4 | 前端基础：布局、主题、路由、API Client、状态管理、通用组件 | 设计系统 + 应用骨架 + 可登录 | ✅ **已完成**：Next 14 App Router + Tailwind 脚手架、设计 token（语义色 + 暗色，`STATUS_TONE` 与后端同源）、API Client（统一解包 / 错误码 / **刷新令牌单飞队列**）、会话与 `can()`、SWR 全局配置、**9 个通用组件**（状态标签 / 投票进度条 / 数据表 / 分页 / 空态 / 骨架屏 / 弹窗 / 权限包装 / 页面头）、受保护布局（侧边栏按权限过滤 + 顶栏主题与退出）、登录页、工作台（真数据）、错误边界与 404、**7 个业务路由的可导航骨架与 403 说明页**；`next build` 10 条路由全绿。业务页面按计划属阶段 5 |
 | 5 | 前端业务：工作台、投票中心、流程详情、任务中心、上报中心、流程设计器、统计 | 全部业务页面可交互 | ✅ **已完成**（设计器为 JSON 式，拖拽画布留作后续）：工作台、投票中心、实例列表、流程详情（投票/改票/标记缺席/填写结论/进度与明细/上报链路）、发起流程（按 formSchema 动态表单）、任务中心（接单→勾检查项→提交→验收/打回/阻塞/重开）、上报中心（逐级链路 + 上级结论回写 + 上溯）、通知、组织架构、模板（只读 + 发布）、**流程设计器**（克隆草稿版本 → 读整图 → 在线校验 → 整图保存 → 发布，校验复用后端 `validateNodeGraph` 与规则完备性）、统计（轻量版：指标卡 + 任务分布，趋势图待补）。15 条路由 `next build` 全绿；页面数据源已逐个用真库验证 |
 | 6 | 简化部署、联调、测试、文档、验收 | `docker-compose.dev/prod.yml`、启动与备份脚本、联调文档、验收清单 | 🟡 **基本完成**：`docker/docker-compose.{dev,prod}.yml` + Caddyfile（可选 tls profile）+ 两个 Dockerfile；`scripts/{setup,wait-for,backup,restore}.mjs`（setup 无 Docker 时优雅降级、restore 强制 `--yes`）；`docs/runbook.md`（含**审计分区 SQL**与常见故障表）、`docs/api.md`（登录/主流程/WS/运维接口示例）、`docs/acceptance-checklist.md`；通知渠道：站内 + **IM Webhook**（企业微信/钉钉/飞书，Webhook 失败不影响发件箱）。**第 7 步端到端验收由用户亲自执行**（清单已备）；邮件/短信渠道与审计分区的实际执行留待上线时 |
+| 7 | UI 质感升级 + 管理后台 | 设计系统升级、通用组件库、管理后台（用户/角色/组织工号/审计/运维） | ✅ **已完成**：设计 token 分层（background/card/surface）、动效与骨架屏、14 个通用组件（Toast/下拉/标签页/抽屉/统计卡/确认框等）、响应式外壳（移动抽屉 + 面包屑 + 用户菜单 + 未读角标）；后端新增 **admin 模块**（5 个控制器 / 24 个接口，全部走 C9 四点式）；前端 `/admin` 六个页面；统计页补齐趋势图与状态分布图 |
+
+### 阶段 7 交付说明
+
+| 块 | 内容 |
+| --- | --- |
+| 设计系统 | `globals.css` 语义 token 分层（`background` < `surface` < `card`）+ 层级阴影 + 统一过渡曲线 + 滚动条/焦点环；`tailwind.config.ts` 补齐动画、阴影、字号、图表色板 |
+| 通用组件 | 新增 `button` / `card` / `toast`(sonner) / `dropdown` / `tabs`(含 Segmented) / `drawer` / `tooltip` / `field` / `confirm-dialog` / `stat-card` / `spinner`；增强 `data-table`（吸顶表头/排序/密度/骨架）、`modal`、`skeleton`、`empty-state`、`status-badge`（语义色圆点）、`pagination`（页码窗口）、`progress-bar`（过渡动画）、`page-header`（面包屑） |
+| 应用外壳 | 移动端抽屉导航、激活态滑块（`layoutId`）、顶栏面包屑、用户下拉、通知未读角标、页面切换过渡、首屏骨架 |
+| 后端管理接口 | `admin/users`（列表/详情/新建/更新/重置密码/分配角色）、`admin/roles`（列表/详情/新建/更新/权限替换/删除/权限目录/角色选项）、`admin/departments`（列表/新建/更新/**移动含子树路径重写**/删除）、`admin/worknos`（工号设置/成员增删/主责人）、`admin/audit`（列表/详情/筛选项字典/CSV 导出）、`admin/ops`（概览/运行态/发件箱列表/人工重放/立即派发） |
+| 权限点 | 新增 `SYS_MONITOR`（系统监控与运维），需重跑 `pnpm db:seed` 才会入库 |
+| 依赖 | 新增 `framer-motion`、`sonner`、`recharts`（此前 ROADMAP 声明过但未安装） |
+
+**注意**：`AdminUserService` / `AdminRoleService` 等写操作全部经 `DomainEventService` 在同事务内落 `AuditLog` + `OutboxEvent`，
+并在 `DomainEventService.aggregateType` 上新增了 `USER / ROLE / DEPARTMENT / WORKNO / SYSTEM` 五种聚合类型。
 
 ### 阶段 2 结束时确认的三个口径（2026-09-26）
 

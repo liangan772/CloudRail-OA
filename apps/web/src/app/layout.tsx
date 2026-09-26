@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { SwrProvider } from '@/components/providers/swr-provider';
+import { AppToaster } from '@/components/ui/toast';
 import { SessionProvider } from '@/lib/session';
 import './globals.css';
 
@@ -25,6 +26,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <SessionProvider>
           <SwrProvider>{children}</SwrProvider>
         </SessionProvider>
+        <AppToaster />
       </body>
     </html>
   );
