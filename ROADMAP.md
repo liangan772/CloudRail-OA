@@ -28,7 +28,7 @@
 
 | 阶段 | 名称 | 主要交付物 | 状态 |
 | --- | --- | --- | --- |
-| 0 | 需求澄清、信息架构、技术选型、数据模型草案 | `ROADMAP.md`、`docs/stage-0/*` | ✅ 已完成，待确认 |
+| 0 | 需求澄清、信息架构、技术选型、数据模型草案 | `ROADMAP.md`、`docs/stage-0/*`（含 Q1–Q27 冻结基线） | ✅ 已完成，等待「进入阶段 1」指令 |
 | 1 | Prisma Schema、共享类型与枚举、种子数据 | `apps/api/prisma/schema.prisma`、`packages/shared`、`prisma/seed.ts`、monorepo 脚手架 | ⏸ 未开始 |
 | 2 | 后端核心：Auth、Org、Workflow、VoteEngine、NodeStateMachine、RuleEngine、**投票结论（VoteConclusion）** | 可运行的 API + 单测（计票/全员表态/结论/状态机/规则求值） | ⏸ 未开始 |
 | 3 | 后端扩展：TaskEngine、EscalationEngine（逐级 + 上级投票复用同一 `VoteEngine`）、BullMQ、WebSocket、审计、Outbox | 队列消费者 + 网关 + 审计与发件箱 | ⏸ 未开始 |

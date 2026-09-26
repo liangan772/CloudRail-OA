@@ -134,7 +134,7 @@ Tenant ─┬─ User ─┬─ UserDepartment ── Department(自引用 paren
 
 1. `toDeptId` 只能取 `Department.parentId`（直接上级）或沿 `Department.path` **逐级上溯一级**（每级单独成链，不允许一次跳多级）。
 2. 投递对象不是人，而是**上级部门的工号**：`toWorkNo = 上级部门.workNo`（写入 `Escalation.toWorkNo` 作快照，事后改工号不影响历史）。
-3. 通知发给该工号的**全部成员**（`DepartmentWorkNoMember.receiveNotify=true`）。**工号成员不是"裁定人"，而是这一级的投票人**：默认 `acceptMode=AUTO`，投递后立即按上级投票规则开投；也可配 `GRAB`，由任一成员先签收再开投。
+3. 通知发给该工号的**全部成员**（`DepartmentWorkNoMember.receiveNotify=true`）。**工号成员不是"裁定人"，而是这一级的投票人**（已确认）：默认 `voterType=DEPT_WORKNO`、全部成员各持 1 票，`isPrimary` 只决定"谁默认填写结论"，不决定"谁才有票"；默认 `acceptMode=AUTO`，投递后立即开投，也可配 `GRAB` 由任一成员先签收再开投。
 4. **这一级的结论由投票产生**（多数/比例/否决规则 + 全员表态 + 人工结论），没有任何单人可以直接裁定；`handledBy` 只记录"签收人/结论填写人"，不代表其一人决定。
 5. 上级部门未配置工号时按兜底策略 `onMissingWorkNo`：`ESCALATE_UP`（继续上溯一级找有工号的部门，默认）/ `NOTIFY_ADMIN`（通知租户管理员）/ `BLOCK`（阻断并报错）。
 6. `SKIP_TO_LEVEL` / 指定非直接上级部门仅在租户开关 `allowCrossLevel=true` 时可用，且需 `ESC_CROSS_LEVEL` 权限 + 理由必填。
@@ -185,7 +185,7 @@ Tenant ─┬─ User ─┬─ UserDepartment ── Department(自引用 paren
 | 投票 | `TiePolicy` | `ESCALATE`（**已确认：报上级组织裁定**）、`REJECT`、`CHAIRMAN_VOTE` |
 | 投票 | `VoterStatus` | `PENDING, VOTED, TIMEOUT, DELEGATED, SKIPPED, ABSENT`（缺席者被排除出投票池） |
 | 投票 | `AbsenceSource` | `MANUAL`（人工标记）、`LEAVE_SYNC`（请假数据自动命中）、`DECLARED`（本人声明） |
-| 投票 | `QuorumPolicy` | `NONE`、`MIN_POOL_RATIO`（**默认：池内人数 ≥ 应投票人数 × `minQuorum`，默认 0.6**）、`MIN_POOL_N` |
+| 投票 | `QuorumPolicy` | `MIN_POOL_RATIO`（**已确认启用**：池内人数 ≥ 应投票人数 × `minQuorum`，`minQuorum=0.6`）、`NONE`、`MIN_POOL_N` |
 | 通用 | `DeadlineMode` | `CALENDAR_DAY`（**已确认：自然日**）、`WORKING_DAY`（保留，需节假日数据） |
 | 组织 | `WorkNoMissingPolicy` | `ESCALATE_UP`（默认）、`NOTIFY_ADMIN`、`BLOCK` |
 | 上报 | `EscalationAcceptMode` | `AUTO`（**默认：投递即开投，无需签收**）、`GRAB`（任一工号成员签收后开投）、`ASSIGNED` |
@@ -385,7 +385,7 @@ ADOPTED / RETURNED ──意见回写原流程──▶ CLOSED
 | `A / R / B` | 同意 / 反对 / 弃权 的**票数**（只计最新票，`isReplaced=false`） |
 | `Wa / Wr` | 同意 / 反对票的**权重和** |
 | `absentCount` | 缺席人数（`status=ABSENT`），与被剔除的权重 |
-| `minQuorum` | 最低法定人数比例（默认 0.6）：`N_pool / N_expected >= minQuorum` 才允许本层通过 |
+| `minQuorum` | 最低法定人数比例（**已确认 0.6**）：`N_pool / N_expected >= minQuorum` 才允许本层通过，否则直接转上报 |
 | `D` | 有效票分母 `denominator` |
 | `A' / R'` | 按弃权策略折算后的同意 / 反对有效数 |
 | `stated` | 已表态人数（`InstanceNodeVoter.status ∈ {VOTED, DELEGATED}`） |
