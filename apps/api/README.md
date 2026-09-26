@@ -8,7 +8,23 @@ pnpm --filter @oa/api build        # 构建到 dist/（入口 dist/main.js）
 pnpm --filter @oa/api typecheck    # src / prisma seed / test 三套配置一起查
 pnpm --filter @oa/api test         # 单测（不连数据库）
 pnpm --filter @oa/api test:e2e     # 真实库全链路 e2e
+pnpm --filter @oa/api db:cleanup   # 清理流程数据（默认预演，加 --yes 才执行）
 ```
+
+### 清理流程数据
+
+e2e 会往演示租户写流程数据，跑多了需要清一清。脚本**默认只预演**（列清单不删），确认后加 `--yes`：
+
+```bash
+pnpm --filter @oa/api db:cleanup                      # 预演：列出将被删除的数据
+pnpm --filter @oa/api db:cleanup -- --yes             # 删除单号以 OA- 开头的实例及其全部关联数据
+pnpm --filter @oa/api db:cleanup -- --yes --all       # 删除该租户全部流程数据
+pnpm --filter @oa/api db:cleanup -- --yes --reset-sequences   # 顺带把单号序列重置为 1
+```
+
+删除范围：流程实例、实例节点、投票人快照、投票记录、计票快照、人工结论、冻结记录、任务（含参与人/检查项/依赖/日志）、上报单（含链路与记录）。
+**不动**配置数据：租户、用户、部门、角色与权限、流程模板（含版本与节点配置）。
+可选 `--with-notifications`（删引用被删实例单号的站内通知）、`--with-audit`（删对应审计日志）、`--tenant=<code>`、`--prefix=<前缀>`（可多次传）。
 
 ## 环境变量
 
