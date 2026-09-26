@@ -15,6 +15,13 @@ cp .env.example .env
 # 必须改：POSTGRES_PASSWORD、JWT_ACCESS_SECRET、JWT_REFRESH_SECRET（各 64 字节随机串）
 # 建议改：CORS_ORIGINS（前端域名）、DEFAULT_TENANT_CODE
 
+# 启动前自检：这三项留空会被 compose 直接拒绝（有意为之，避免弱口令上线）
+grep -E '^(POSTGRES_PASSWORD|JWT_ACCESS_SECRET|JWT_REFRESH_SECRET)=.+' .env \
+  || echo '✖ 上面三项必须填写'
+
+# 生成随机密钥（各跑一次）
+openssl rand -hex 32
+
 # ⚠️ 必须显式 --env-file .env：compose 的变量替换读的是「项目目录下的 .env」，
 #    而项目目录默认是 compose 文件所在目录（docker/），不是仓库根目录
 docker compose --env-file .env -f docker/docker-compose.prod.yml up -d --build
