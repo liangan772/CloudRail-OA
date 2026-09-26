@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { SwrProvider } from '@/components/providers/swr-provider';
 import { SessionProvider } from '@/lib/session';
 import './globals.css';
 
@@ -21,7 +22,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body>
-        <SessionProvider>{children}</SessionProvider>
+        <SessionProvider>
+          <SwrProvider>{children}</SwrProvider>
+        </SessionProvider>
       </body>
     </html>
   );
