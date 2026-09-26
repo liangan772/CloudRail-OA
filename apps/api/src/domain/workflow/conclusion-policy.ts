@@ -8,6 +8,9 @@ import {
   type VoteDecision,
 } from '@oa/shared';
 
+/** 结论的取值域：只有通过 / 驳回（弃权不许出现在结论里） */
+export type ConclusionDecisionValue = Extract<VoteDecision, 'APPROVE' | 'REJECT'>;
+
 /**
  * 人工投票结论策略（纯函数，零 IO）。
  *
@@ -32,12 +35,12 @@ export interface ConclusionPlan {
   required: boolean;
   conclusionStatus: ConclusionStatus;
   /** 系统拟判定（一定是终局值：APPROVE / REJECT） */
-  systemDecision: VoteDecision;
+  systemDecision: ConclusionDecisionValue;
   /** `AUTO` 模式下系统直接落库的结论 */
   autoConclusion?: {
     source: 'SYSTEM_AUTO';
-    decision: VoteDecision;
-    systemDecision: VoteDecision;
+    decision: ConclusionDecisionValue;
+    systemDecision: ConclusionDecisionValue;
     isOverride: false;
   };
   /** 提前算出的节点去向，便于调用方直接落库 */
@@ -60,7 +63,8 @@ export function planConclusion(mode: ConclusionMode, tally: TallyResult): Conclu
     };
   }
 
-  const systemDecision = tally.systemDecision;
+  // tally.systemDecision 已排除 PENDING（上面刚判过），这里收窄成通过 / 驳回
+  const systemDecision: ConclusionDecisionValue = tally.systemDecision === 'APPROVE' ? 'APPROVE' : 'REJECT';
   const nodeStatus: Extract<InstanceNodeStatus, 'PASSED' | 'REJECTED'> =
     systemDecision === 'APPROVE' ? 'PASSED' : 'REJECTED';
 
@@ -97,8 +101,8 @@ export function planConclusion(mode: ConclusionMode, tally: TallyResult): Conclu
 
 export interface SubmitConclusionInput {
   mode: ConclusionMode;
-  /** 计票产出的系统拟判定 */
-  systemDecision: VoteDecision;
+  /** 计票产出的系统拟判定（一定是终局值） */
+  systemDecision: ConclusionDecisionValue;
   /** 结论人选择的判定 */
   decision: VoteDecision;
   /** 结论意见（必填） */
@@ -110,8 +114,8 @@ export interface SubmitConclusionInput {
 }
 
 export interface ConclusionRecord {
-  decision: VoteDecision;
-  systemDecision: VoteDecision;
+  decision: ConclusionDecisionValue;
+  systemDecision: ConclusionDecisionValue;
   isOverride: boolean;
   overrideReason?: string;
   content: string;
@@ -167,7 +171,8 @@ export function submitConclusion(input: SubmitConclusionInput): SubmitConclusion
   return {
     ok: true,
     conclusion: {
-      decision: input.decision,
+      // 上面已运行时校验只可能是 APPROVE / REJECT
+      decision: input.decision as ConclusionDecisionValue,
       systemDecision: input.systemDecision,
       isOverride,
       overrideReason: isOverride ? overrideReason : undefined,
@@ -204,10 +209,10 @@ export type FinalConclusionResult = FinalConclusionSuccess | ConclusionFailure;
  */
 export function finalConclusionFromEscalation(
   opinion: EscalationFinalOpinion,
-  systemDecision: VoteDecision,
+  systemDecision: ConclusionDecisionValue,
   content: string,
 ): FinalConclusionResult {
-  const decision: VoteDecision = opinion === 'FINAL_APPROVE' ? 'APPROVE' : 'REJECT';
+  const decision: ConclusionDecisionValue = opinion === 'FINAL_APPROVE' ? 'APPROVE' : 'REJECT';
   const text = content?.trim() || (decision === 'APPROVE' ? '上级终审通过' : '上级终审驳回');
 
   return {

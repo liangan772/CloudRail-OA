@@ -341,6 +341,7 @@ export type NodeEvent =
   | 'OPEN'
   | 'VOTE_CAST'
   | 'VETO_LOCK'
+  | 'VETO_TERMINATE'
   | 'ALL_STATED'
   | 'MARK_ABSENT'
   | 'REVOKE_ABSENT'
@@ -358,6 +359,7 @@ export const NODE_EVENT_LABEL: Record<NodeEvent, string> = {
   OPEN: '开启投票',
   VOTE_CAST: '投票 / 改票',
   VETO_LOCK: '否决锁定',
+  VETO_TERMINATE: '否决立即终结',
   ALL_STATED: '池内全员表态',
   MARK_ABSENT: '标记缺席',
   REVOKE_ABSENT: '撤销缺席',
@@ -432,6 +434,10 @@ export interface NodeTransitionContext {
   deadlinePassed?: boolean;
   /** 是否仍有池内成员未表态 */
   hasUnstatedVoters?: boolean;
+  /** 是否已命中否决规则（锁定不予通过） */
+  vetoLocked?: boolean;
+  /** 一票否决是否立即终结投票（默认 false，见已确认规则 A5） */
+  vetoTerminates?: boolean;
   /** 已催办轮次 */
   remindCount?: number;
   /** 最大催办轮次（默认 3） */
@@ -464,7 +470,17 @@ export interface NodeTransitionContext {
 
 export const NODE_EVENT_TABLE: Record<InstanceNodeStatus, NodeEvent[]> = {
   PENDING: ['OPEN', 'SKIP'],
-  VOTING: ['VOTE_CAST', 'VETO_LOCK', 'ALL_STATED', 'MARK_ABSENT', 'REVOKE_ABSENT', 'DEADLINE_HIT', 'ESCALATE', 'SKIP'],
+  VOTING: [
+    'VOTE_CAST',
+    'VETO_LOCK',
+    'VETO_TERMINATE',
+    'ALL_STATED',
+    'MARK_ABSENT',
+    'REVOKE_ABSENT',
+    'DEADLINE_HIT',
+    'ESCALATE',
+    'SKIP',
+  ],
   PENDING_CONCLUSION: ['SUBMIT_CONCLUSION', 'CONCLUSION_TIMEOUT', 'SKIP'],
   PASSED: ['COMPLETE'],
   REJECTED: ['COMPLETE'],
@@ -512,7 +528,16 @@ export function transitionNode(
     }
 
     case 'VOTE_CAST': {
-      if (from !== 'VOTING') return invalid(from, event);
+      // 已经出结论（待填结论 / 已通过 / 已驳回）时给更准确的 VOTE_CLOSED，
+      // 只有还没开启等真正"状态不对"的情况才报 NODE_INVALID_TRANSITION
+      if (from !== 'VOTING') {
+        const alreadyConcluded =
+          from === 'PENDING_CONCLUSION' || from === 'PASSED' || from === 'REJECTED' || ctx.conclusionFormed === true;
+        if (alreadyConcluded) {
+          return reject(ERROR_CODES.VOTE_CLOSED, '本层已形成结论，不能再投票或改票');
+        }
+        return invalid(from, event);
+      }
       if (ctx.isVoter === false) {
         return reject(ERROR_CODES.VOTE_NOT_VOTER, '操作人不在本层投票人快照名单内');
       }
@@ -543,6 +568,32 @@ export function transitionNode(
         'SET_VETO_LOCKED',
         'NOTIFY_CONCLUSION_AUTHOR',
       ], '否决规则命中，锁定为不予通过，但仍等待池内全员表态');
+    }
+
+    /**
+     * 否决立即终结：只有节点规则显式开启 `vetoTerminates` 才允许（默认关闭）。
+     * 已确认规则 A5 要求「一票否决只锁定不予通过，仍等全员表态」，
+     * 所以默认路径是 VETO_LOCK；这条事件是给少数"必须立刻停"的场景留的开关。
+     */
+    case 'VETO_TERMINATE': {
+      if (from !== 'VOTING') return invalid(from, event);
+      if (!ctx.vetoTerminates) {
+        return reject(
+          ERROR_CODES.NODE_INVALID_TRANSITION,
+          '本层未开启「否决立即终结」（默认仍等池内全员表态）',
+        );
+      }
+      if (!ctx.vetoLocked) {
+        return reject(ERROR_CODES.NODE_INVALID_TRANSITION, '尚未命中否决规则，不能按否决终结');
+      }
+      return accept(from, 'PENDING_CONCLUSION', [
+        'SET_VETO_LOCKED',
+        'WRITE_PROVISIONAL_RESULT',
+        'SET_CONCLUSION_PENDING',
+        'SCHEDULE_CONCLUSION_TIMEOUT',
+        'NOTIFY_CONCLUSION_AUTHOR',
+        'BROADCAST_CONCLUSION_PENDING',
+      ], '否决立即终结：锁定不予通过并直接进入结论阶段');
     }
 
     case 'ALL_STATED': {

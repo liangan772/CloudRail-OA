@@ -6,6 +6,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { OrgModule } from './modules/org/org.module';
 import { WorkflowTemplateModule } from './modules/workflow-template/workflow-template.module';
 import { InstanceModule } from './modules/instance/instance.module';
+import { VoteModule } from './modules/vote/vote.module';
 import { HealthController } from './modules/health/health.controller';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from './modules/auth/guards/permissions.guard';
@@ -20,6 +21,7 @@ import { DataScopeGuard } from './modules/auth/guards/data-scope.guard';
     OrgModule,
     WorkflowTemplateModule,
     InstanceModule,
+    VoteModule,
   ],
   controllers: [HealthController],
   providers: [

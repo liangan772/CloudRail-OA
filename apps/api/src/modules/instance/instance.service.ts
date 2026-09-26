@@ -11,10 +11,14 @@ import { validateNodeGraph } from '../../domain/workflow/graph';
 import { transitionInstance, transitionNode, type InstanceAction, type NodeAction } from '../../domain/workflow/state-machines';
 import { resolveVoters, type VoterDirectory } from '../../domain/vote/voter-resolution';
 import type { InstanceListQuery } from './instance.dto';
+import { VoterDirectoryService } from './voter-directory.service';
 
 @Injectable()
 export class InstanceService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly directory: VoterDirectoryService,
+  ) {}
 
   private scopeOf(user: AuthenticatedUser): ScopePredicate {
     const resolved = resolveScope(user);
@@ -81,7 +85,7 @@ export class InstanceService {
     const firstNode = version.nodes.find((node) => node.nodeKey === firstVoteKey);
     if (!firstNode) throw AppError.of('WF_NODE_GRAPH_INVALID', '模板没有投票层，无法发起');
 
-    const directory = await this.loadVoterDirectory(user);
+    const directory = await this.directory.load(user, user.primaryDeptId);
     const resolution = resolveVoters(
       firstNode.voterRules.map((rule) => ({
         id: rule.id,
@@ -441,50 +445,4 @@ export class InstanceService {
     return `${prefix}-${period}-${String(sequence.nextValue).padStart(4, '0')}`;
   }
 
-  /** 解析投票人所需的候选数据，按租户一次性查全，避免逐条规则查库 */
-  private async loadVoterDirectory(user: AuthenticatedUser): Promise<VoterDirectory> {
-    const [departments, users, groups, workNoMembers] = await this.prisma.$transaction([
-      this.prisma.department.findMany({
-        where: { tenantId: user.tenantId, status: 'ACTIVE' },
-        select: { id: true, parentId: true, path: true },
-      }),
-      this.prisma.user.findMany({
-        where: { tenantId: user.tenantId, status: 'ACTIVE' },
-        select: {
-          id: true,
-          departments: { select: { departmentId: true, isLeader: true } },
-          roles: { select: { role: { select: { code: true } } } },
-        },
-      }),
-      this.prisma.voteGroup.findMany({
-        where: { tenantId: user.tenantId },
-        select: { code: true, members: { select: { userId: true, weight: true } } },
-      }),
-      this.prisma.departmentWorkNoMember.findMany({
-        where: { tenantId: user.tenantId, status: 'ACTIVE' },
-        select: { departmentId: true, userId: true, isPrimary: true },
-      }),
-    ]);
-
-    const deptById = new Map(departments.map((d) => [d.id, d]));
-    const initiatorDeptId = user.primaryDeptId ?? null;
-    const parentDeptId = initiatorDeptId != null ? deptById.get(initiatorDeptId)?.parentId ?? null : null;
-
-    return {
-      departments,
-      users: users.map((item) => ({
-        userId: item.id,
-        deptIds: item.departments.map((d) => d.departmentId),
-        leaderDeptIds: item.departments.filter((d) => d.isLeader).map((d) => d.departmentId),
-        roleCodes: item.roles.map((assignment) => assignment.role.code),
-      })),
-      voteGroups: groups.map((group) => ({
-        code: group.code,
-        members: group.members.map((member) => ({ userId: member.userId, weight: Number(member.weight) })),
-      })),
-      workNoMembers,
-      initiatorDeptId,
-      parentDeptId,
-    };
-  }
 }

@@ -232,6 +232,26 @@ describe('状态机 · 层级节点 §6.2', () => {
     expect(r.ok && r.reason).toContain('仍等待');
   });
 
+  it('VETO_TERMINATE：默认关闭，开启后锁定否决并直接进入结论阶段', () => {
+    // 默认（vetoTerminates 未开）：拒绝，仍走"等全员表态"的路径
+    expect(transitionNode(nodeCtx({ vetoLocked: true }), 'VETO_TERMINATE')).toMatchObject({
+      ok: false,
+      error: ERROR_CODES.NODE_INVALID_TRANSITION,
+    });
+
+    // 开启了但还没命中否决规则：同样拒绝
+    expect(
+      transitionNode(nodeCtx({ vetoLocked: false, vetoTerminates: true }), 'VETO_TERMINATE'),
+    ).toMatchObject({ ok: false, error: ERROR_CODES.NODE_INVALID_TRANSITION });
+
+    const r = transitionNode(nodeCtx({ vetoLocked: true, vetoTerminates: true }), 'VETO_TERMINATE');
+    expect(r).toMatchObject({ ok: true, status: 'PENDING_CONCLUSION' });
+    expect(r.ok && r.actions).toEqual(
+      expect.arrayContaining(['SET_VETO_LOCKED', 'WRITE_PROVISIONAL_RESULT', 'SET_CONCLUSION_PENDING']),
+    );
+    expect(allowedNodeEvents('VOTING')).toContain('VETO_TERMINATE');
+  });
+
   it('ALL_STATED：池内还有人未表态时不得进入结论阶段', () => {
     expect(transitionNode(nodeCtx({ hasUnstatedVoters: true }), 'ALL_STATED')).toMatchObject({
       ok: false,

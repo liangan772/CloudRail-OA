@@ -1,4 +1,5 @@
 import { InstanceService } from './instance.service';
+import { VoterDirectoryService } from './voter-directory.service';
 import { AppError } from '../../common/errors/app-error';
 import type { AuthenticatedUser } from '../../common/context/authenticated-user';
 
@@ -121,10 +122,15 @@ function buildMocks() {
   return { prisma, tx };
 }
 
+/** 装配被测服务：投票人目录服务复用同一份假仓储，因此仍不触达数据库 */
+function buildService(prisma: unknown): InstanceService {
+  return new InstanceService(prisma as never, new VoterDirectoryService(prisma as never));
+}
+
 describe('实例发起 · 编排', () => {
   it('按状态机把实例与节点置为 VOTING，并按单号序列生成流程编号', async () => {
     const { prisma, tx } = buildMocks();
-    const service = new InstanceService(prisma as never);
+    const service = buildService(prisma);
 
     const result = await service.createInstance(actor, input);
 
@@ -149,7 +155,7 @@ describe('实例发起 · 编排', () => {
 
   it('首层投票人解析结果写进快照，带权重与来源理由', async () => {
     const { prisma, tx } = buildMocks();
-    const service = new InstanceService(prisma as never);
+    const service = buildService(prisma);
 
     const result = await service.createInstance(actor, input);
 
@@ -167,7 +173,7 @@ describe('实例发起 · 编排', () => {
 
   it('返回状态机产出的副作用清单，供阶段 3 的 Outbox/WS 消费', async () => {
     const { prisma } = buildMocks();
-    const service = new InstanceService(prisma as never);
+    const service = buildService(prisma);
 
     const result = await service.createInstance(actor, input);
 
@@ -186,7 +192,7 @@ describe('实例发起 · 编排', () => {
     const { prisma, tx } = buildMocks();
     // 技术部没有任何用户 → DEPARTMENT 规则解析为空
     prisma.user.findMany.mockResolvedValue([]);
-    const service = new InstanceService(prisma as never);
+    const service = buildService(prisma);
 
     await expect(service.createInstance(actor, input)).rejects.toBeInstanceOf(AppError);
     await expect(service.createInstance(actor, input)).rejects.toMatchObject({
@@ -198,7 +204,7 @@ describe('实例发起 · 编排', () => {
 
   it('表单不满足模板必填要求 → WF_FORM_SCHEMA_INVALID', async () => {
     const { prisma, tx } = buildMocks();
-    const service = new InstanceService(prisma as never);
+    const service = buildService(prisma);
 
     await expect(
       service.createInstance(actor, { ...input, formData: {} }),
@@ -209,7 +215,7 @@ describe('实例发起 · 编排', () => {
   it('模板没有已发布版本 → WF_VERSION_NOT_PUBLISHED', async () => {
     const { prisma } = buildMocks();
     prisma.workflowTemplate.findFirst.mockResolvedValue({ ...templateRow, currentVersionId: null });
-    const service = new InstanceService(prisma as never);
+    const service = buildService(prisma);
 
     await expect(service.createInstance(actor, input)).rejects.toMatchObject({
       code: 'WF_VERSION_NOT_PUBLISHED',
