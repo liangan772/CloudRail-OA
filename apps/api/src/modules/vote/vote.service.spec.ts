@@ -49,7 +49,16 @@ function voter(userId: number): AuthenticatedUser {
   };
 }
 
-function buildFake(options: { deadline?: Date; voterIds?: number[]; nodeStatus?: string } = {}) {
+function buildFake(
+  options: {
+    deadline?: Date;
+    voterIds?: number[];
+    nodeStatus?: string;
+    /** 模拟"这是某次上报的上级投票节点" */
+    escalationId?: number | null;
+    rule?: Partial<typeof ruleRow>;
+  } = {},
+) {
   const state = {
     voters: (options.voterIds ?? [3, 4]).map((userId) => ({ userId, weight: 1, status: 'PENDING' as string })),
     votes: [] as { id: number; voterId: number; decision: string; weight: number; revoteSeq: number; isReplaced: boolean }[],
@@ -81,7 +90,8 @@ function buildFake(options: { deadline?: Date; voterIds?: number[]; nodeStatus?:
     vetoLocked: state.vetoLocked,
     conclusionStatus: state.conclusionStatus,
     conclusionDeadline: null,
-    node: { nodeKey: 'layer1_tech', voteRule: ruleRow },
+    escalationId: options.escalationId ?? null,
+    node: { nodeKey: 'layer1_tech', voteRule: { ...ruleRow, ...(options.rule ?? {}) } },
     voters: state.voters.map((item) => ({ ...item })),
     votes: state.votes.filter((vote) => !vote.isReplaced).map((vote) => ({ ...vote })),
     voteResult: state.voteResult,
@@ -146,6 +156,8 @@ function buildFake(options: { deadline?: Date; voterIds?: number[]; nodeStatus?:
         return {};
       }),
     },
+    // 上级投票节点出结论时要同步上报单状态
+    escalation: { update: jest.fn(async () => ({})) },
   };
 
   const prisma = {
@@ -162,7 +174,7 @@ function buildFake(options: { deadline?: Date; voterIds?: number[]; nodeStatus?:
 /** 最近一次构造用到的规则引擎替身（供用例断言"有没有真的去问规则引擎"） */
 let lastRules: { checkForNode: jest.Mock } | null = null;
 /** 最近一次构造用到的上报引擎替身（阶段 3：命中后真的建上报单） */
-let lastEscalations: { create: jest.Mock } | null = null;
+let lastEscalations: { create: jest.Mock; upgradeInTx: jest.Mock } | null = null;
 
 /** 装配被测服务；`escalation` 传入时表示规则引擎会命中上报 */
 function buildService(prisma: unknown, escalation?: { matched: unknown[]; errors: string[] }): VoteService {
@@ -187,6 +199,15 @@ function buildService(prisma: unknown, escalation?: { matched: unknown[]; errors
       frozen: true,
       hops: [],
       reason: '投递到部门 2 的工号 D1001',
+    }),
+    upgradeInTx: jest.fn().mockResolvedValue({
+      escalationId: 77,
+      level: 2,
+      toDeptId: 1,
+      toWorkNo: 'D1000',
+      upwardNodeId: 903,
+      upwardVoterCount: 1,
+      summary: '继续上溯到总部工号 D1000',
     }),
   };
   lastEscalations = escalations;
@@ -315,6 +336,37 @@ describe('投票闭环 · 守卫', () => {
 });
 
 describe('投票闭环 · 上报规则接线', () => {
+
+  it('上级投票平票 → 按 D9 继续上溯一级（不再进结论阶段）', async () => {
+    const { prisma } = buildFake({
+      escalationId: 77,
+      rule: { rejectRule: 'NONE', passRule: 'MAJORITY', tiePolicy: 'ESCALATE' },
+    });
+    const service = buildService(prisma);
+
+    await service.castVote(voter(3), 501, { decision: 'APPROVE' });
+    const result = await service.castVote(voter(4), 501, { decision: 'REJECT' });
+
+    expect(result.escalationUpgraded).toMatchObject({ level: 2, toWorkNo: 'D1000' });
+    expect(result.reason).toContain('平票');
+    expect(result.nodeStatus).toBe('DONE');
+    expect(lastEscalations!.upgradeInTx).toHaveBeenCalledTimes(1);
+  });
+
+  it('上级投票命中否决时优先按否决处理，不按平票上溯（§8.0 否决优先）', async () => {
+    const { prisma } = buildFake({
+      escalationId: 77,
+      rule: { rejectRule: 'ANY_VETO', tiePolicy: 'ESCALATE' },
+    });
+    const service = buildService(prisma);
+
+    await service.castVote(voter(3), 501, { decision: 'APPROVE' });
+    const result = await service.castVote(voter(4), 501, { decision: 'REJECT' });
+
+    expect(lastEscalations!.upgradeInTx).not.toHaveBeenCalled();
+    expect(result.appliedEvents).toEqual(['VETO_LOCK', 'ALL_STATED']);
+  });
+
   const matchedRule = {
     ruleId: 21,
     triggerType: 'OVER_LIMIT',

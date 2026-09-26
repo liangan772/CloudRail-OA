@@ -72,6 +72,7 @@ export class TaskService {
         assigneeRule: true,
         acceptanceRule: true,
         triggerOn: true,
+        dependsOn: true,
       },
     });
     const passTemplates = templates.filter((template) => template.triggerOn === 'PASS');
@@ -81,8 +82,13 @@ export class TaskService {
     const taskIds: number[] = [];
     const skipped: { title: string; reason: string }[] = [];
     const now = new Date();
+    // 依赖声明的解析依据：位置（0 起）与标题
+    const taskIdByIndex = new Map<number, number>();
+    const taskIdByTitle = new Map<string, number>();
+    const declaredDeps: { taskIndex: number; refs: (number | string)[] }[] = [];
 
-    for (const template of passTemplates) {
+    for (const [templateIndex, template] of passTemplates.entries()) {
+      const refs = Array.isArray(template.dependsOn) ? (template.dependsOn as (number | string)[]) : [];
       const ownerRule = (template.assigneeRule ?? {}) as unknown as AssigneeRuleSpec;
       const acceptance = (template.acceptanceRule ?? {}) as { acceptorRule?: AssigneeRuleSpec };
       // 模板没配验收人规则时的默认：由流程发起人验收（E2 只要求"恰好一个"，没说必须另有其人）
@@ -123,7 +129,8 @@ export class TaskService {
           canAssign: true,
           hasOwner: assignment.ownerId != null,
           hasAcceptor: assignment.acceptorId != null,
-          hasUnfinishedDependency: false,
+          // 声明了依赖就先落阻塞（E3）：等前置任务验收通过后由 autoUnblockDependents 解锁
+          hasUnfinishedDependency: refs.length > 0,
         },
         assignment.mode === 'GRAB' ? 'BLOCK' : 'ASSIGN',
       );
@@ -170,6 +177,9 @@ export class TaskService {
       });
 
       taskIds.push(created.id);
+      taskIdByIndex.set(templateIndex, created.id);
+      taskIdByTitle.set(template.title, created.id);
+      if (refs.length > 0) declaredDeps.push({ taskIndex: templateIndex, refs });
 
       await this.events.emit(tx, {
         tenantId: params.tenantId,
@@ -210,6 +220,19 @@ export class TaskService {
           after: { code, title: template.title, mode: assignment.mode, owner: assignment.ownerId },
         },
       });
+    }
+
+    // 依赖落库：数字按"本层排序后的位置"解析，字符串按标题解析
+    for (const declaration of declaredDeps) {
+      const taskId = taskIdByIndex.get(declaration.taskIndex);
+      if (!taskId) continue;
+      for (const ref of declaration.refs) {
+        const dependsOnTaskId = typeof ref === 'number' ? taskIdByIndex.get(ref) : taskIdByTitle.get(String(ref));
+        if (!dependsOnTaskId || dependsOnTaskId === taskId) continue;
+        await tx.taskDependency.create({
+          data: { taskId, dependsOnTaskId, type: 'FINISH_TO_START' },
+        });
+      }
     }
 
     return { taskIds, skipped, openTasks: taskIds.length };
@@ -321,6 +344,8 @@ export class TaskService {
       }, comment);
 
       const advanced = await this.maybeAdvanceInstance(tx, user, task);
+      // E3：依赖已完成 → 自动解锁下游任务
+      const unlocked = await this.autoUnblockDependents(tx, user, task.id);
       await this.events.emit(tx, {
         tenantId: user.tenantId,
         eventType: WS_EVENTS.TASK_UPDATED,
@@ -351,6 +376,7 @@ export class TaskService {
         taskId: task.id,
         status: transition.status,
         ...advanced,
+        unlockedTasks: unlocked,
         reason: transition.reason,
       };
     });
@@ -683,6 +709,64 @@ export class TaskService {
       where: { taskId, dependsOnTask: { status: { notIn: ['DONE', 'CANCELLED'] } } },
     });
     return pending > 0;
+  }
+
+  /**
+   * 前置任务完成后自动解锁下游（E3）。
+   *
+   * 只解锁"所有前置都已完成"的那些 BLOCKED 任务，并回到 PENDING_ACCEPT（任务已分配、等待接单）——
+   * 状态变更同样走状态机（UNBLOCK 的 `blockedFrom` 传 PENDING_ACCEPT），不直接写状态。
+   */
+  private async autoUnblockDependents(tx: Tx, user: AuthenticatedUser, completedTaskId: number): Promise<number[]> {
+    const dependents = await tx.taskDependency.findMany({
+      where: { dependsOnTaskId: completedTaskId },
+      select: { taskId: true },
+    });
+    if (dependents.length === 0) return [];
+
+    const unlocked: number[] = [];
+    for (const dependent of dependents) {
+      const task = await tx.task.findFirst({
+        where: { id: dependent.taskId },
+        select: { id: true, status: true, tenantId: true, instanceId: true },
+      });
+      if (!task || task.status !== 'BLOCKED') continue;
+      if (await this.hasUnfinishedDependency(tx, task.id)) continue;
+
+      const transition = transitionTask(
+        { status: 'BLOCKED', dependenciesDone: true, blockedFrom: 'PENDING_ACCEPT' },
+        'UNBLOCK',
+      );
+      if (!transition.ok) continue;
+
+      await this.applyTransition(
+        tx,
+        { ...user, tenantId: task.tenantId },
+        task.id,
+        'BLOCKED',
+        transition.status as TaskStatus,
+        transition.actions,
+        { blockedReason: null },
+        '前置任务已完成，自动解锁',
+      );
+      await this.events.emit(tx, {
+        tenantId: task.tenantId,
+        eventType: WS_EVENTS.TASK_UPDATED,
+        aggregateType: 'TASK',
+        aggregateId: task.id,
+        payload: { event: 'UNBLOCK', status: transition.status, instanceId: task.instanceId, automatic: true },
+        rooms: [WS_ROOMS.instance(task.instanceId ?? 0)],
+        audit: {
+          actorId: null,
+          action: 'TASK_UNBLOCK_AUTO',
+          targetType: 'Task',
+          targetId: task.id,
+          after: { reason: '前置任务已完成' },
+        },
+      });
+      unlocked.push(task.id);
+    }
+    return unlocked;
   }
 
   /**

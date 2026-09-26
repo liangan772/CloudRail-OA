@@ -63,6 +63,10 @@ pnpm --filter @oa/api test:e2e
 全链路覆盖：登录 → 组织/工号 → 模板 → 发起（真库解析并快照投票人）→ 全员表态 →
 人工结论 → 开启下一层 → 跨部门可见性（B1/B2）→ 定局停留态 → 金额超限条件上报。
 
+> **待应用迁移**：`20260926054000_task_template_dependencies`（新增 `NodeTaskTemplate.dependsOn`）
+> 是手写的增量迁移（纯加列、可空、无需回填）。数据库可达时执行一次即可：
+> `pnpm --filter @oa/api db:deploy`
+
 ### 在生产服务器上跑（推荐）
 
 数据库（Docker 里的 PostgreSQL）只在服务器本地监听，所以在服务器上跑最省事，

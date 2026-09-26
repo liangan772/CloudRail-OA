@@ -37,11 +37,11 @@
 
 | # | 项 | 说明 |
 | --- | --- | --- |
-| 1 | 上报平票（TIE）自动上溯 | 目前平票进入 `PENDING_CONCLUSION` 由上级结论处理；D9 的"平票即上溯"只实现了超时路径 |
-| 2 | 任务依赖的模板声明 | `TaskDependency` 与状态机都支持依赖，但模板还不能直接声明"任务 B 依赖任务 A" |
+| 1 | 上报平票（TIE）自动上溯 | ✅ 已实现：上级投票平票且策略为上报时，**在同一事务内**上溯一级；命中否决时按「否决优先」处理，不按平票上溯 |
+| 2 | 任务依赖的模板声明 | ✅ 已实现：`NodeTaskTemplate.dependsOn`（数字 = 按 order 排序后的位置，字符串 = 标题）→ 建任务即落 `TaskDependency` 并进 `BLOCKED`，前置验收通过后自动解锁回 `PENDING_ACCEPT`。⚠️ 迁移 `20260926054000_task_template_dependencies` **待应用**（链路恢复后 `pnpm --filter @oa/api db:deploy`） |
 | 3 | 通知渠道 | 站内通知已打通；邮件 / 短信 / IM 的适配器按计划留到阶段 6 |
 | 4 | 审计日志按月分区 | schema 里已是普通表，分区在建库脚本里按计划留到上线前（阶段 6） |
-| 5 | WS 的自动化验证 | 未装 `socket.io-client`，网关目前靠"事件确实进了 Outbox 并被派发"间接验证 |
+| 5 | WS 的自动化验证 | ✅ 已补：用假 socket/server 单测覆盖令牌鉴权、房间加入（user/dept/workno）与广播语义，不引入 `socket.io-client` |
 
 ### 阶段 3 实现时发现的一处文档冲突（已按最高优先级约束实现）
 

@@ -733,6 +733,10 @@ model NodeTaskTemplate {
   dueOffset    Int      @default(24)
   checklist    Json     @default("[]")
   acceptanceRule Json?
+  /// 依赖声明：数字表示「本层按 order 排序后第 N 条模板」（0 起），字符串表示按 title 匹配。
+  /// 例如 [0] 表示依赖第一条任务模板。建任务时落成 TaskDependency，
+  /// 依赖未完成时新任务直接进 BLOCKED（E3），依赖完成后自动解锁。
+  dependsOn    Json?
   /// PASS：本层通过后创建；ALWAYS：节点开启即创建
   triggerOn    String   @default("PASS") @db.VarChar(16)
   order        Int      @default(0)

@@ -137,6 +137,7 @@ export class VoteService {
         reason: applied.reason,
         escalation: applied.escalation,
         escalationCreated: applied.escalationCreated ?? null,
+        escalationUpgraded: applied.escalationUpgraded ?? null,
       };
     });
   }
@@ -367,6 +368,8 @@ export class VoteService {
     escalation: { matched: EscalationEvaluationResult['matched']; errors: string[] } | null;
     /** 命中的上报规则实际建出的上报单（由 EscalationEngine 返回） */
     escalationCreated?: unknown;
+    /** 上级投票平票触发的自动上溯结果 */
+    escalationUpgraded?: unknown;
   }> {
     const [voters, votes] = await Promise.all([
       tx.instanceNodeVoter.findMany({
@@ -394,6 +397,44 @@ export class VoteService {
     };
     const decision = decideNodeProgress(input);
     const { tally } = decision;
+
+    /**
+     * 上级投票平票 → 按 D9 继续上溯一级，而不是停在结论阶段。
+     * 走事务内的 upgradeInTx，保证"记票 + 上溯"落在同一个事务里。
+     */
+    // 否决优先（§8.0）：命中否决规则时本层已是"不予通过"的确定结论，不按平票上溯
+    if (
+      ctx.node.escalationId != null &&
+      tally.tieDetected &&
+      !tally.vetoLocked &&
+      ctx.rule.tiePolicy === 'ESCALATE'
+    ) {
+      const upgraded = await this.escalations.upgradeInTx(
+        tx,
+        user,
+        ctx.node.escalationId,
+        '上级投票平票，按平票策略继续上溯一级',
+      );
+      return {
+        nodeStatus: 'DONE',
+        vetoLocked: ctx.node.vetoLocked,
+        conclusionStatus: ctx.node.conclusionStatus,
+        progress: {
+          expected: tally.pool.expected,
+          pool: tally.pool.pool,
+          stated: statedCount(input.voters),
+          approve: tally.counts.approve,
+          reject: tally.counts.reject,
+          quorumSatisfied: tally.pool.quorumSatisfied,
+        },
+        systemDecision: tally.systemDecision,
+        // 平票不改本节点状态机（旧上级节点被 upgrade 置为 DONE），事件记在 escalationUpgraded 里
+        appliedEvents: [] as NodeEvent[],
+        reason: `上级投票平票，已按策略上溯到 L${upgraded.level}（工号 ${upgraded.toWorkNo ?? '—'}）`,
+        escalation: null,
+        escalationUpgraded: upgraded,
+      };
+    }
 
     /**
      * 上报条件优先于正常结论：本层即将进入结论阶段时，先跑节点上的上报规则

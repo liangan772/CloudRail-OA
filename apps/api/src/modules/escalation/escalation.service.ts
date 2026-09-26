@@ -487,7 +487,17 @@ export class EscalationService {
 
   /** 继续上报上一级（D9）：平票 / 僵局 / 结论超时后的逐级上溯 */
   async upgrade(user: AuthenticatedUser, escalationId: number, reason: string) {
-    return this.prisma.runInTransaction(async (tx) => {
+    return this.prisma.runInTransaction((tx) => this.upgradeInTx(tx, user, escalationId, reason));
+  }
+
+  /**
+   * 上溯的事务内实现。
+   *
+   * 单独暴露给投票流程用：上级投票平票时要**在本层这同一事务里**改成继续上溯，
+   * 不能再开一个事务（Prisma 嵌套事务会互相等锁）。
+   */
+  async upgradeInTx(tx: Tx, user: AuthenticatedUser, escalationId: number, reason: string) {
+    {
       const escalation = await tx.escalation.findFirst({
         where: { id: escalationId, tenantId: user.tenantId },
         select: {
@@ -611,7 +621,7 @@ export class EscalationService {
         upwardVoterCount: started.voterCount,
         summary: resolved.target.reason,
       };
-    });
+    }
   }
 
   /* -------------------------------- 内部 -------------------------------- */
