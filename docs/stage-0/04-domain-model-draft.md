@@ -19,11 +19,11 @@
 | 票 | `Vote` | 一条不可篡改的投票记录（改票为新增 + 标记替换） |
 | 计票快照 | `VoteResult` | 该层结论的不可变记录，含计数、加权分、规则快照 |
 | 任务 | `Task` | 投票通过后要执行的协作单元，可嵌套子任务 |
-| 上报 | `Escalation` | 把决策权上交给上级部门；带完整链路 `EscalationChain` |
+| 上报 | `Escalation` | 把决策权上交上级部门，并**在上级部门再跑一次同样的投票流程**，最终意见回写原流程；带完整链路 `EscalationChain` |
 | 投票结论 | `VoteConclusion` | 本层**全员表态后由指定人填写的人工结论**；可确认或改判系统自动判定 |
 | 可见范围 | `VoteViewScope` | 投票明细的可见边界：默认仅本部门，上报链上的上级部门可见全部 |
 | 表态 | `stated` | 投票人已提交明确选择（同意/反对）；未表态不算投票，且**不允许弃权** |
-| 部门工号 | `Department.workNo` | 部门级统一处理入口：上报**统一投递到上级部门的工号**，由工号成员抢占受理 |
+| 部门工号 | `Department.workNo` | 部门级统一处理入口：上报**统一投递到上级部门的工号**；工号成员即该级的投票人（不是裁定人） |
 | 有效票 | `denominator` | 参与通过率计算的分母，取决于 `abstainPolicy` |
 | 否决优先 | veto-priority | 判定顺序：否决规则命中即驳回，不再看通过规则 |
 
@@ -124,17 +124,18 @@ Tenant ─┬─ User ─┬─ UserDepartment ── Department(自引用 paren
 
 | 实体 | 关键字段 | 约束与索引 |
 | --- | --- | --- |
-| `Escalation` | `id, tenantId, sourceType, sourceId, instanceId, taskId, fromDeptId, toDeptId, reason, status, requestedBy, handledBy, handledAt, result, comment, *code, *level, *triggerType, *targetRule, *deadline, *frozenInstanceStatus, *maxLevel, *fromWorkNo, *toWorkNo（目标工号快照）` | **`(toWorkNo, status)`**（工号待办主查询）、`(toDeptId, status)`、`(instanceId)`、`(tenantId, status, createdAt)` |
-| `EscalationChain` | `id, escalationId, level, deptId, handlerId, status, handledAt, *enteredAt, *actionType, *comment, *deadline, *workNo` | 唯一 `(escalationId, level)`；`(workNo, status)` 索引 |
+| `Escalation` | `id, tenantId, sourceType, sourceId, instanceId, taskId, fromDeptId, toDeptId, reason, status, requestedBy, handledBy, handledAt, result, comment, *code, *level, *triggerType, *targetRule, *deadline, *frozenInstanceStatus, *maxLevel, *fromWorkNo, *toWorkNo（目标工号快照）, *upwardInstanceNodeId（上级投票节点）, *finalOpinion（最终意见正文）, *writeBackAction, *voteRound` | **`(toWorkNo, status)`**（工号待办主查询）、`(toDeptId, status)`、`(instanceId)`、`(tenantId, status, createdAt)` |
+| `EscalationChain` | `id, escalationId, level, deptId, handlerId, status, handledAt, *enteredAt, *actionType, *comment, *deadline, *workNo, *instanceNodeId（该级投票节点）` | 唯一 `(escalationId, level)`；`(workNo, status)` 索引 |
 | `EscalationRecord` | `id, escalationId, actorId, action, comment, attachments(JSONB), createdAt, *fromStatus, *toStatus` | `(escalationId, createdAt)` |
 
 **目标投递解析（用户已确认：不允许越级 + 统一上报到上级工号）**：
 
 1. `toDeptId` 只能取 `Department.parentId`（直接上级）或沿 `Department.path` **逐级上溯一级**（每级单独成链，不允许一次跳多级）。
 2. 投递对象不是人，而是**上级部门的工号**：`toWorkNo = 上级部门.workNo`（写入 `Escalation.toWorkNo` 作快照，事后改工号不影响历史）。
-3. 通知发给该工号的**全部成员**（`DepartmentWorkNoMember.receiveNotify=true`）；任一成员可**抢占受理**，受理成功后 `handledBy` 落定并锁定，其他人转为只读协作者（避免多人重复处理）。
-4. 上级部门未配置工号时按兜底策略 `onMissingWorkNo`：`ESCALATE_UP`（继续上溯一级找有工号的部门，默认）/ `NOTIFY_ADMIN`（通知租户管理员）/ `BLOCK`（阻断并报错）。
-5. `SKIP_TO_LEVEL` / 指定非直接上级部门仅在租户开关 `allowCrossLevel=true` 时可用，且需 `ESC_CROSS_LEVEL` 权限 + 理由必填。
+3. 通知发给该工号的**全部成员**（`DepartmentWorkNoMember.receiveNotify=true`）。**工号成员不是"裁定人"，而是这一级的投票人**：默认 `acceptMode=AUTO`，投递后立即按上级投票规则开投；也可配 `GRAB`，由任一成员先签收再开投。
+4. **这一级的结论由投票产生**（多数/比例/否决规则 + 全员表态 + 人工结论），没有任何单人可以直接裁定；`handledBy` 只记录"签收人/结论填写人"，不代表其一人决定。
+5. 上级部门未配置工号时按兜底策略 `onMissingWorkNo`：`ESCALATE_UP`（继续上溯一级找有工号的部门，默认）/ `NOTIFY_ADMIN`（通知租户管理员）/ `BLOCK`（阻断并报错）。
+6. `SKIP_TO_LEVEL` / 指定非直接上级部门仅在租户开关 `allowCrossLevel=true` 时可用，且需 `ESC_CROSS_LEVEL` 权限 + 理由必填。
 
 ### 4.6 通用与平台
 
@@ -182,18 +183,19 @@ Tenant ─┬─ User ─┬─ UserDepartment ── Department(自引用 paren
 | 投票 | `VoterStatus` | `PENDING, VOTED, TIMEOUT, DELEGATED, SKIPPED` |
 | 通用 | `DeadlineMode` | `CALENDAR_DAY`（**已确认：自然日**）、`WORKING_DAY`（保留，需节假日数据） |
 | 组织 | `WorkNoMissingPolicy` | `ESCALATE_UP`（默认）、`NOTIFY_ADMIN`、`BLOCK` |
-| 上报 | `EscalationAcceptMode` | `GRAB`（**默认：工号成员抢占受理**）、`ASSIGNED`（指定到人） |
+| 上报 | `EscalationAcceptMode` | `AUTO`（**默认：投递即开投，无需签收**）、`GRAB`（任一工号成员签收后开投）、`ASSIGNED` |
 | 任务 | `TaskStatus` | `PENDING_ASSIGN, PENDING_ACCEPT, IN_PROGRESS, PENDING_ACCEPTANCE, DONE, OVERDUE, CANCELLED, BLOCKED, ESCALATED` |
 | 任务 | `TaskPriority` | `LOW, NORMAL, HIGH, URGENT` |
 | 任务 | `TaskAssigneeRole` | `OWNER, COLLABORATOR, WATCHER, ACCEPTOR` |
 | 任务 | `AssigneeRuleType` | `MANUAL, ROLE, DEPARTMENT, VOTE_GROUP, LOAD_BALANCE, GRAB` |
 | 任务 | `TaskDependencyType` | `FINISH_TO_START, START_TO_START` |
 | 上报 | `EscalationSourceType` | `VOTE, TASK, INSTANCE, MANUAL` |
-| 上报 | `EscalationStatus` | `PENDING, SUBMITTED, ACCEPTED, VOTING, TASKING, RETURNED, ADOPTED, UPGRADED, CLOSED` |
+| 上报 | `EscalationStatus` | `PENDING, SUBMITTED, SIGNED, VOTING, PENDING_CONCLUSION, ADOPTED, RETURNED, UPGRADED, CLOSED`（已移除 `TASKING`/`ACCEPTED`：上级不再单独派任务，也不再由单人裁定） |
 | 上报 | `EscalationTrigger` | `MANUAL, TIMEOUT, TIE, REPEATED_REJECT, OVER_LIMIT, CROSS_DEPT_DISPUTE, INSUFFICIENT_PERMISSION, TASK_BLOCKED, TASK_OVERDUE` |
 | 上报 | `TargetDeptRule` | `DIRECT_PARENT`（默认）、`LEVEL_UP`；`SKIP_TO_LEVEL` / `SPECIFIC_DEPT` **已移除默认能力**，需租户开关 `allowCrossLevel=true` 才启用（用户已确认不允许越级） |
-| 上报 | `EscalationAction` | `ACCEPT, RETURN, REQUEST_MORE, START_VOTE, ASSIGN_TASK, UPGRADE, FINAL_DECIDE, CLOSE` |
-| 上报 | `EscalationResult` | `CONTINUE, RETURN, FINAL_APPROVE, FINAL_REJECT, CLOSE` |
+| 上报 | `EscalationAction` | `SIGN, START_VOTE, CAST_VOTE, SUBMIT_CONCLUSION, CONTINUE, RETURN, REQUEST_MORE, UPGRADE, FINAL_APPROVE, FINAL_REJECT, CLOSE` |
+| 上报 | `EscalationResult` | `CONTINUE, RETURN, REQUEST_MORE, FINAL_APPROVE, FINAL_REJECT, CLOSE` |
+| 上报 | `WriteBackAction` | `CONTINUE`（解冻继续，按需派任务）、`RETURN`（退回原部门重走本层）、`REQUEST_MORE`（生成补充材料任务）、`FINAL_APPROVE`、`FINAL_REJECT` |
 | 权限 | `ScopeType` | `SELF, DEPT, DEPT_AND_SUB, DEPT_LIST, TENANT` |
 | 权限 | `PermissionType` | `MENU, ACTION, DATA` |
 | 通用 | `NotificationType` | `VOTE_PENDING, VOTE_RESULT, TASK_ASSIGNED, TASK_OVERDUE, ESCALATION_CREATED, ESCALATION_HANDLED, INSTANCE_FINISHED, SYSTEM` |
@@ -300,32 +302,45 @@ PENDING_ASSIGN ──assign──▶ PENDING_ACCEPT ──accept──▶ IN_PRO
 ### 6.4 上报 `Escalation`
 
 ```
-PENDING ──submit──▶ SUBMITTED ──accept──▶ ACCEPTED ─┬─ startVote ─▶ VOTING ─┐
-                                                     └─ assignTask ─▶ TASKING ┤
-   VOTING|TASKING ──return──▶ RETURNED ──close──▶ CLOSED                      │
-   VOTING|TASKING ──upgrade──▶ UPGRADED ──(新建下一级)→ SUBMITTED ────────────┤
-   VOTING|TASKING ──adopt──▶ ADOPTED ──close──▶ CLOSED                        │
-   SUBMITTED ──timeout──▶ 按 targetDeptRule 自动上报下一级 (UPGRADED) ────────┘
-   ACCEPTED ──finalDecide──▶ ADOPTED / RETURNED
+PENDING ──submit──▶ SUBMITTED（已投递到上级部门工号）
+                        │
+                        ├─（默认 AUTO）自动开投 ─────────────┐
+                        ├─（可选 GRAB）工号成员签收 → SIGNED ─┤
+                        └─ 签收超时 ─▶ UPGRADED（上溯一级）    │
+                                                              ▼
+                             VOTING（上级投票：与普通层同一套规则）
+                                    │  全员表态 + 不允许弃权 + 结论前可改票
+                                    ├──全员表态──▶ PENDING_CONCLUSION（上级人工结论）
+                                    │                    ├─ CONTINUE ─▶ ADOPTED
+                                    │                    ├─ RETURN / REQUEST_MORE ─▶ RETURNED
+                                    │                    └─ FINAL_* ─▶ ADOPTED
+                                    ├──平票（TiePolicy=ESCALATE）─▶ UPGRADED
+                                    └──投票僵局 / 结论超时 ─▶ UPGRADED
+
+UPGRADED ──(新建下一级)──▶ SUBMITTED   ← 逐级投票，直至 maxLevel 或形成结论
+ADOPTED / RETURNED ──意见回写原流程──▶ CLOSED
 ```
 
 > 越级（跳级）不在本版本支持范围：`advance()` 只能沿 `Department.parentId` 走**一级**，因此 `EscalationChain.level` 必然连续（1,2,3…），不存在缺口。
+> 上级投票复用完全相同的 `VoteEngine` 与结论机制（全员表态、不允许弃权、结论形成前可改票、人工结论、按部门可见），因此「上报 = 让上级按同样流程投一次票」。
+> 上级投票节点的归属：`InstanceNode` **仍挂在原流程实例下**（`layerIndex` 继续递增、`escalationId` 回指该次上报），因此步骤条、时间线、实例级分布式锁、可见性规则全部复用，不需要为上报另建一套投票表。
 
 | 当前状态 | 事件 | 守卫条件 | 下一状态 | 副作用 |
 | --- | --- | --- | --- | --- |
-| PENDING | `SUBMIT` | 触发源校验；目标部门解析成功；目标部门工号已配置（否则按 `onMissingWorkNo` 兜底） | SUBMITTED | 建 `Escalation`（快照 `fromWorkNo / toWorkNo`）+ `EscalationChain(L1)`；**冻结原流程**（已确认）；通知**工号全部成员**；WS `escalation.created` |
-| SUBMITTED | `ACCEPT` | 处理人是目标工号成员且具 `ESC_HANDLE`；该上报尚未被他人受理（抢占式） | ACCEPTED | 抢占落定 `handledBy/handledAt`；同工号其他成员转为只读；追加 chain 级 |
-| SUBMITTED | `TIMEOUT` | 超过 `NodeEscalationRule.timeout` | UPGRADED | 沿 path 上溯生成下一级；若已达 `maxLevel` → 通知租户管理员并 `CLOSED`（记录「无法继续上报」） |
-| ACCEPTED | `START_VOTE` | 有权限 | VOTING | 创建上级投票节点（复用 `InstanceNode` 机制，`escalationId` 回指） |
-| ACCEPTED | `ASSIGN_TASK` | 有权限 | TASKING | 创建任务；`Task.sourceEscalationId` 回指 |
-| ACCEPTED | `REQUEST_MORE` | 有权限 | SUBMITTED（级别不变） | 向原部门要补充材料；仅追加 `EscalationRecord`，不加链级 |
-| VOTING | `TALLY_PASSED/REJECTED` | 计票完成 | ACCEPTED | 记录上级投票结论 |
-| TASKING | `TASK_DONE` | 任务验收通过 | ACCEPTED | 记录执行结果 |
-| ACCEPTED | `RETURN` | 有权限 | RETURNED | 回写原流程 `RETURN`（按深度） |
-| ACCEPTED | `ADOPT` | 有权限 | ADOPTED | 回写原流程 `CONTINUE` 或 `FINAL_*` |
-| ACCEPTED | `UPGRADE` | 有权限且未超 `maxLevel` | UPGRADED | 追加下一级 chain；重置 deadline |
-| UPGRADED | `SUBMITTED`(自动) | 下一级目标解析成功 | SUBMITTED | 通知新目标部门 |
-| RETURNED / ADOPTED / UPGRADED(终) | `CLOSE` | — | CLOSED | 回写原流程终态；解冻；通知全链路；写审计 |
+| PENDING | `SUBMIT` | 触发源校验；直接上级部门已配工号（否则按 `onMissingWorkNo` 兜底） | SUBMITTED | 建 `Escalation`（快照 `fromWorkNo / toWorkNo`）+ `EscalationChain(L1)`；**冻结原流程**（已确认）；通知**工号全部成员**；WS `escalation.created` |
+| SUBMITTED | `AUTO_START_VOTE` | `acceptMode=AUTO`（默认） | VOTING | 按上级投票人规则（默认 `DEPT_WORKNO` = 目标工号成员）实例化投票人；创建上级投票节点写入 `upwardInstanceNodeId`；WS `escalation.voting_started` |
+| SUBMITTED | `SIGN` | `acceptMode=GRAB`；操作人是目标工号成员且具 `ESC_HANDLE` | SIGNED | 记录签收人；同工号其他成员转只读；随后自动或手动开投 |
+| SUBMITTED / SIGNED | `SIGN_TIMEOUT` | 超过签收时限 | UPGRADED | 上溯一级；若已达 `maxLevel` → 通知租户管理员并 `CLOSED` |
+| VOTING | `VOTE_CAST` | 投票人在上级投票人集合内；本轮结论未形成 | VOTING | 复用 `VoteEngine`（同一套计票与改票规则）；WS `vote.cast` |
+| VOTING | `ALL_STATED` | 全员已表态 | PENDING_CONCLUSION | 计票产出系统拟判定；通知上级结论填写人（默认目标工号主责人）；WS `conclusion.pending` |
+| VOTING | `TIE` | 平票且 `TiePolicy=ESCALATE`（已确认） | UPGRADED | 上报再上一级继续投票（逐级，不跳级） |
+| VOTING | `DEADLOCK_TIMEOUT` | 投票超时且策略为上报 | UPGRADED | 同上 |
+| PENDING_CONCLUSION | `SUBMIT_CONCLUSION` | 上级结论填写人有权；改判需填理由 | ADOPTED / RETURNED | 写上级 `VoteConclusion` + `Escalation.finalOpinion`；按结论决定 `writeBackAction` |
+| PENDING_CONCLUSION | `CONCLUSION_TIMEOUT` | 上级结论超时未填 | UPGRADED | 上溯一级（避免结论卡死） |
+| ADOPTED | `WRITE_BACK` | 结论 = 继续 / 终审 | CLOSED | 回写原流程：`CONTINUE`（解冻继续投票或按需派任务）或 `FINAL_APPROVE`/`FINAL_REJECT`；WS `escalation.handled` |
+| RETURNED | `WRITE_BACK` | 结论 = 退回 / 要求补充 | CLOSED | 回写原流程：`RETURN`（退回原部门重走本层）或 `REQUEST_MORE`（生成补充材料任务） |
+| UPGRADED | `SUBMIT`(自动) | 下一级目标工号解析成功 | SUBMITTED | 追加下一级 chain；重置 deadline；通知新目标工号 |
+| 任意 | `CLOSE` | — | CLOSED | 解冻（若尚未）；通知全链路；写审计 |
 
 ## 7. 投票人解析规则结构（`NodeVoterRule.voterValue`）
 
@@ -593,4 +608,6 @@ Value     := Literal | { "$path": Path }            // 支持与另一字段比�
 | 20 | 新增 `DepartmentWorkNoMember` | 工号是"部门级账号"，需要一张表记录谁能用该工号收件与处理 | 阶段 1 建表；上报受理与通知依赖它 |
 | 21 | `Escalation` 增加 `fromWorkNo / toWorkNo` | 工号快照，事后调整工号不影响历史链路 | 阶段 1 字段 + `(toWorkNo, status)` 索引 |
 
-以上 21 条建议默认全部采纳（第 1 条降级为可选、本版本不建表）；如需删减请指出编号，我将在阶段 1 调整 schema。
+| 22 | `Escalation` 增加 `upwardInstanceNodeId / finalOpinion / writeBackAction`，上级投票**复用 `InstanceNode` + `VoteEngine`**，不新建投票体系 | 用户确认「上报 = 让上级做一次同样的投票」；复用可保证规则语义与前端组件完全一致 | 阶段 3 的核心实现；避免第二套计票逻辑 |
+
+以上 22 条建议默认全部采纳（第 1 条降级为可选、本版本不建表）；如需删减请指出编号，我将在阶段 1 调整 schema。

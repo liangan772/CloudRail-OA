@@ -20,7 +20,8 @@
 | C11 | 投票明细**按部门可见**：投票人只能看到本部门明细，上级部门可看到上报相关的全部明细 | `VoteViewScope=DEPT_ONLY` + 上报链可见性覆盖；跨部门只给聚合计数 |
 | C12 | **每个投票人都必须表态**，且每层形成**人工投票结论** | 默认不允许弃权；未全员表态不得进入结论；`PENDING_CONCLUSION` 状态 + `VoteConclusion` 人工结论实体 |
 | C13 | **不允许越级上报** | `EscalationEngine` 只支持「直接上级」与「逐级上溯」，跳级能力默认关闭 |
-| C14 | 每个部门设置**部门工号**，上报**统一投递到上级部门的工号**（不是投给人） | `Department.workNo` + `DepartmentWorkNoMember`；`Escalation.toWorkNo` 快照；工号成员抢占受理 |
+| C14 | 每个部门设置**部门工号**，上报**统一投递到上级部门的工号**（不是投给人） | `Department.workNo` + `DepartmentWorkNoMember`；`Escalation.toWorkNo` 快照；工号成员即该级投票人 |
+| C15 | **上报 = 让上级部门再跑一次同样的投票**，结论意见回写原流程 | `Escalation.upwardInstanceNodeId` 复用 `InstanceNode` + `VoteEngine`；上级同样全员表态、人工结论；单人不裁定、不派任务 |
 
 ## 二、阶段划分与交付物
 
@@ -29,7 +30,7 @@
 | 0 | 需求澄清、信息架构、技术选型、数据模型草案 | `ROADMAP.md`、`docs/stage-0/*` | ✅ 已完成，待确认 |
 | 1 | Prisma Schema、共享类型与枚举、种子数据 | `apps/api/prisma/schema.prisma`、`packages/shared`、`prisma/seed.ts`、monorepo 脚手架 | ⏸ 未开始 |
 | 2 | 后端核心：Auth、Org、Workflow、VoteEngine、NodeStateMachine、RuleEngine、**投票结论（VoteConclusion）** | 可运行的 API + 单测（计票/全员表态/结论/状态机/规则求值） | ⏸ 未开始 |
-| 3 | 后端扩展：TaskEngine、EscalationEngine（仅逐级）、BullMQ、WebSocket、审计、Outbox | 队列消费者 + 网关 + 审计与发件箱 | ⏸ 未开始 |
+| 3 | 后端扩展：TaskEngine、EscalationEngine（逐级 + 上级投票复用同一 `VoteEngine`）、BullMQ、WebSocket、审计、Outbox | 队列消费者 + 网关 + 审计与发件箱 | ⏸ 未开始 |
 | 4 | 前端基础：布局、主题、路由、API Client、状态管理、通用组件 | 设计系统 + 应用骨架 + 可登录 | ⏸ 未开始 |
 | 5 | 前端业务：工作台、投票中心、流程详情、任务中心、上报中心、流程设计器、统计 | 全部业务页面可交互 | ⏸ 未开始 |
 | 6 | 简化部署、联调、测试、文档、验收 | `docker-compose.dev/prod.yml`、启动与备份脚本、联调文档、验收清单 | ⏸ 未开始 |
