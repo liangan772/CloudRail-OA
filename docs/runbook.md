@@ -140,3 +140,43 @@ pnpm --filter @oa/api db:cleanup -- --yes      # 执行
 ```
 
 只删业务记录，不动组织/用户/角色/模板/单号序列（要重置序列加 `--reset-sequences`）。
+
+## 8. 卸载 / 彻底清理
+
+按需要选清理深度，**从 ① 往下逐级加重**：
+
+```bash
+cd CloudRail-OA
+
+# ① 停并删除容器（数据卷保留：之后想回来还能原样起）
+docker compose --env-file .env -f docker/docker-compose.prod.yml down
+
+# ② 连数据一起删（不可恢复：oa-pgdata / oa-redis / oa-uploads / caddy 卷都会被删除）
+docker compose --env-file .env -f docker/docker-compose.prod.yml down -v
+#    想确认卷名：docker volume ls | grep -i oa
+
+# ③ 删镜像（compose 构建出来的名字形如 docker-api / docker-web）
+docker images | grep -E 'docker-(api|web)'
+docker rmi <上一步列出的镜像 ID>
+
+# ④ 删项目目录（先把 docker/backups 里要留的备份移出去）
+ls docker/backups
+cd .. && rm -rf CloudRail-OA
+```
+
+宝塔面板侧需要手工做的两件事：
+
+- 删除站点与反向代理（网站 → 对应域名 → 删除）
+- 启用了 `tls` profile 的话，Caddy 容器随 ①② 一起清掉，证书数据在 `oa-caddy-data` 卷里
+
+**最容易漏掉的一点**：如果之前复用了宝塔面板里的 PostgreSQL 应用（容器 `postgresql_enp7-...`，端口 `35432`）
+当开发库，那套**不属于本 compose**，卸载本项目不会动它。它默认对公网开放（`0.0.0.0:35432`），
+不再使用时建议一并停掉，或至少把来源收窄到固定 IP。
+
+收尾自检：
+
+```bash
+docker ps | grep oa-                       # 不应再有 oa-* 容器
+docker volume ls | grep -i oa              # 走完 ② 后应无 pgdata/redis/uploads 卷
+ss -tlnp | grep -E '3000|3001'             # 端口应已释放
+```
