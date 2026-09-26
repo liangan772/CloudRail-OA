@@ -1,0 +1,40 @@
+# 构建上下文要小：本地这些目录动辄几百 MB，传进 daemon 会把构建拖成几分钟。
+node_modules
+**/node_modules
+.pnpm-store
+
+# 构建产物（镜像里会重新构建）
+dist
+**/dist
+.next
+**/.next
+.turbo
+*.tsbuildinfo
+
+# 运行期数据与备份（不要打进镜像）
+data
+uploads
+backups
+docker/backups
+docker/volumes
+
+# 环境与密钥（运行期通过 compose 注入，绝不进镜像）
+.env
+.env.local
+.env.*.local
+.env.production
+*.pem
+*.key
+*.p12
+*.pfx
+secrets
+
+# 其它
+.git
+.github
+*.log
+coverage
+.idea
+.vscode
+.DS_Store
+Thumbs.db
