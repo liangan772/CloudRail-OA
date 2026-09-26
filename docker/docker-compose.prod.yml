@@ -51,7 +51,11 @@ services:
       NODE_ENV: production
       TZ: ${TZ:-Asia/Shanghai}
       API_PORT: 3001
-      DATABASE_URL: postgresql://${POSTGRES_USER:-oa}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-oa}?schema=public
+      # 默认由 POSTGRES_* 拼出容器内的连接串。
+      # 若口令含 URL 保留字符（@ : / ? # %），拼出来的串会被解析坏 → 认证失败；
+      # 此时在 .env 里设 OA_DATABASE_URL（特殊字符做 URL 编码）覆盖即可。
+      # 注意别用 DATABASE_URL 这个名字：.env 里的那个是开发用的（指向 localhost）。
+      DATABASE_URL: ${OA_DATABASE_URL:-postgresql://${POSTGRES_USER:-oa}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-oa}?schema=public}
       REDIS_URL: redis://redis:6379
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?请设置 JWT_ACCESS_SECRET}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?请设置 JWT_REFRESH_SECRET}
