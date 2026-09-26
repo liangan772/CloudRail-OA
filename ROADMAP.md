@@ -20,6 +20,7 @@
 | C11 | 投票明细**按部门可见**：投票人只能看到本部门明细，上级部门可看到上报相关的全部明细 | `VoteViewScope=DEPT_ONLY` + 上报链可见性覆盖；跨部门只给聚合计数 |
 | C12 | **每个投票人都必须表态**，且每层形成**人工投票结论** | 默认不允许弃权；未全员表态不得进入结论；`PENDING_CONCLUSION` 状态 + `VoteConclusion` 人工结论实体 |
 | C13 | **不允许越级上报** | `EscalationEngine` 只支持「直接上级」与「逐级上溯」，跳级能力默认关闭 |
+| C14 | 每个部门设置**部门工号**，上报**统一投递到上级部门的工号**（不是投给人） | `Department.workNo` + `DepartmentWorkNoMember`；`Escalation.toWorkNo` 快照；工号成员抢占受理 |
 
 ## 二、阶段划分与交付物
 

@@ -10,7 +10,7 @@
 ├ 审批与协作
 │   ├ 投票中心      /votes                            徽标 = 待我投票数
 │   ├ 流程实例      /instances
-│   ├ 上报中心      /escalations                      徽标 = 待我部门处理数
+│   ├ 上报中心      /escalations                      徽标 = 待我工号处理数
 │   └ 任务中心      /tasks                            徽标 = 待我处理数
 ├ 分析
 │   └ 统计报表      /stats
@@ -39,12 +39,12 @@
 | 7 | 流程详情 | `/instances/[id]` | `INSTANCE_READ` | 层级步骤条（Stepper）、各层投票结果卡、任务群列表、上报记录、时间线、附件、评论、操作区（撤回/重提/催办/上报） |
 | 8 | 任务中心 | `/tasks` | `TASK_READ` | 三视图切换：**看板**（dnd-kit 拖拽改状态）/ **列表**（表格 + 批量）/ **甘特**（缩放 + 依赖连线）、筛选与分组、我的/我部门/全部 |
 | 9 | 任务详情 | `/tasks/[id]` | `TASK_READ` | 头部（状态/优先级/负责人/验收人/截止倒计时）、描述、检查项、子任务树、依赖关系图、附件、操作日志、操作区（接受/转派/提交验收/验收） |
-| 10 | 上报中心 | `/escalations` | `ESC_READ` | 分段「待我部门处理 / 我发起的 / 全部」、状态漏斗图、列表（含来源类型徽标、耗时） |
-| 11 | 上报详情 | `/escalations/[id]` | `ESC_READ` | **上报链时间线**（逐级可视化，含每级处理人与耗时）、来源对象卡片（可跳原流程/任务）、目标部门（**逐级上溯，不允许越级**）、**该实例全部层级的投票明细（上级部门可见）**、处理动作面板、结论与附件 |
+| 10 | 上报中心 | `/escalations` | `ESC_READ` | 分段「待我工号处理 / 我发起的 / 全部」、状态漏斗图、列表（含来源工号 → 目标工号、来源类型徽标、耗时） |
+| 11 | 上报详情 | `/escalations/[id]` | `ESC_READ` | **上报链时间线**（逐级可视化，含每级部门工号、处理人与耗时）、来源对象卡片（可跳原流程/任务）、**目标工号（逐级上溯，不允许越级）**、**该实例全部层级的投票明细（上级部门可见）**、抢占受理按钮、处理动作面板、结论与附件 |
 | 12 | 流程设计器 | `/admin/workflow-templates`、`/admin/workflow-templates/[id]` | `WF_DESIGN` | 左侧节点库、中间画布（节点卡片 + 连线 + 层号泳道）、右侧属性面板（投票人规则/投票规则/任务模板/上报规则/超时策略 Tab）、版本列表与发布 |
 | 13 | 任务分配器 | `/admin/assignee-rules` | `TASK_DESIGN` | 分配算法选择（手动/角色/部门/投票组/负载均衡/抢单）、规则 DSL 编辑与**在线试算**（给定模拟任务 → 输出命中人与理由）、负载预览 |
 | 14 | 统计报表 | `/stats` | `STATS_READ` | 4 个 Tab：投票（通过率/规则分布/平均票耗时）、层级耗时（各层箱线/柱状）、任务（完成率/逾期率/负载热力）、上报（触发源分布/上溯层级分布/处理时长） |
-| 15 | 组织架构 | `/admin/org` | `ORG_MANAGE` | 部门树（可展开/拖拽排序）、部门详情（负责人/成员/上级链路面包屑）、成员表格、批量导入导出 |
+| 15 | 组织架构 | `/admin/org` | `ORG_MANAGE` | 部门树（可展开/拖拽排序）、部门详情（负责人/成员/上级链路面包屑）、**部门工号配置（工号 + 主责人 + 收件成员）**、成员表格、批量导入导出 |
 | 16 | 角色权限 | `/admin/roles` | `ROLE_MANAGE` | 角色列表、权限矩阵（权限 × 角色勾选）、数据范围设置（本人/本部门/本部门及下级/指定部门/全租户）、成员分配 |
 | 17 | 消息通知 | `/notifications` | 登录即可 | 未读/已读分段、类型过滤（投票/任务/上报/系统）、批量已读、点击跳转并标记、通知偏好设置入口 |
 | 18 | 个人设置 | `/settings` | 登录即可 | 基本资料、头像、密码修改、通知偏好（站内/邮件/短信/IM）、主题（亮/暗/跟随系统）、时区与语言 |
@@ -78,7 +78,7 @@ app/
 | 待我投票 | 计数 + 最紧急 3 条（含剩余时间） | `GET /votes?scope=mine&status=pending` | 点击进投票详情；「全部」跳投票中心 |
 | 待我处理任务 | 计数 + 最紧急 3 条（含逾期标红） | `GET /tasks?assignee=me&status=open` | 点击进任务详情 |
 | 待我上报 | 我发起的上报中待上级处理 | `GET /escalations?requestedBy=me` | 跳上报详情 |
-| 上报给我部门 | 当前部门需受理的上报 | `GET /escalations?toDept=mine&status=submitted` | 跳上报详情，可直接受理 |
+| 上报到本部门工号 | 投递到本部门工号、待受理的上报 | `GET /escalations?toWorkNo=mine&status=submitted` | 跳上报详情，可抢占受理 |
 | 我发起的 | 我发起的流程实例（按状态分组） | `GET /instances?initiator=me` | 跳流程详情 |
 | 进行中 | 租户内我可见的进行中实例 | `GET /instances?status=active` | 跳列表 |
 | 已结束 | 近 30 天完结实例 | `GET /instances?status=closed&range=30d` | 跳列表 |
@@ -159,7 +159,7 @@ app/
 
 | 概念 | 说明 |
 | --- | --- |
-| 权限点 | `模块_动作` 形式，如 `VOTE_CAST`、`VOTE_VIEW_DEPT`、`VOTE_VIEW_ALL`（仅上报链上级部门）、`NODE_CONCLUDE`（填写投票结论）、`TASK_ASSIGN`、`ESC_UPGRADE`、`ESC_CROSS_LEVEL`（默认关闭，越级已禁止）、`WF_PUBLISH`、`AUDIT_EXPORT`、`ORG_MANAGE`、`ROLE_MANAGE`、`STATS_READ` |
+| 权限点 | `模块_动作` 形式，如 `VOTE_CAST`、`VOTE_VIEW_DEPT`、`VOTE_VIEW_ALL`（仅上报链上级部门）、`NODE_CONCLUDE`（填写投票结论）、`TASK_ASSIGN`、`ESC_HANDLE`（工号受理）、`ESC_UPGRADE`、`ESC_CROSS_LEVEL`（默认关闭，越级已禁止）、`DEPT_WORKNO_MANAGE`、`WF_PUBLISH`、`AUDIT_EXPORT`、`ORG_MANAGE`、`ROLE_MANAGE`、`STATS_READ` |
 | 数据范围 | `SELF` / `DEPT` / `DEPT_AND_SUB` / `DEPT_LIST`（指定部门）/ `TENANT`（全租户），挂在 `UserRole.scopeType + scopeId` |
 | 前端用法 | `usePermissions()` 返回 `{ can(code), scope, deptIds }`；路由守卫 + 按钮级 `can()`；**前端隐藏只是体验，真实拒绝在后端守卫** |
 | 后端用法 | `JwtAuthGuard`（身份）→ `PermissionGuard`（权限点）→ `DataScopeGuard`（把范围注入 `RequestContext`）→ Repository 统一拼 `tenantId + scope` 条件 |
@@ -174,7 +174,7 @@ app/
 | `node.passed` / `node.rejected` / `node.timeout` | `instance:{id}` | 层级步骤条前进/标红；Toast 提示；若当前层变为待我投票则侧边栏徽标 +1 |
 | `task.created` / `task.updated` | `user:{id}`、`dept:{id}` | 任务卡片飞入动画；看板列内重排；徽标更新 |
 | `task.overdue` | `user:{id}`、`dept:{id}` | 卡片转危险色 + 逾期标签；工作台预警区插入 |
-| `escalation.created` | `dept:{toDeptId}` | 上报中心徽标 +1；Toast「有新的上报待你部门受理」 |
+| `escalation.created` | `workno:{toWorkNo}`（工号全体成员） | 上报中心徽标 +1；Toast「有新的上报待本部门工号受理」 |
 | `escalation.handled` | `instance:{id}`、`dept:{fromDeptId}` | 上报链时间线追加一级；流程状态卡更新；若解冻则恢复操作区 |
 | `notification.new` | `user:{id}` | 顶栏铃铛红点 + 抽屉插入；浏览器通知（可选，需用户授权） |
 

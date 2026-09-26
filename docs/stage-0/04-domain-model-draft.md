@@ -23,6 +23,7 @@
 | 投票结论 | `VoteConclusion` | 本层**全员表态后由指定人填写的人工结论**；可确认或改判系统自动判定 |
 | 可见范围 | `VoteViewScope` | 投票明细的可见边界：默认仅本部门，上报链上的上级部门可见全部 |
 | 表态 | `stated` | 投票人已提交明确选择（同意/反对）；未表态不算投票，且**不允许弃权** |
+| 部门工号 | `Department.workNo` | 部门级统一处理入口：上报**统一投递到上级部门的工号**，由工号成员抢占受理 |
 | 有效票 | `denominator` | 参与通过率计算的分母，取决于 `abstainPolicy` |
 | 否决优先 | veto-priority | 判定顺序：否决规则命中即驳回，不再看通过规则 |
 
@@ -42,7 +43,8 @@
 ## 3. ER 总览
 
 ```
-Tenant ─┬─ User ─┬─ UserDepartment ── Department(自引用 parentId, 物化路径 path)
+Tenant ─┬─ User ─┬─ UserDepartment ── Department(自引用 parentId, 物化路径 path, 部门工号 workNo)
+        │        │                        └─ DepartmentWorkNoMember(部门工号操盘人)
         │        ├─ UserRole ── Role ── RolePermission ── Permission
         │        └─ Notification / AuditLog
         ├─ WorkflowTemplate ── WorkflowVersion ─┬─ WorkflowNode ─┬─ NodeVoterRule
@@ -74,11 +76,12 @@ Tenant ─┬─ User ─┬─ UserDepartment ── Department(自引用 paren
 | --- | --- | --- |
 | `Tenant` | `id, name, code, status` | `code` 唯一 |
 | `User` | `id, tenantId, name, email, phone, avatar, status, passwordHash, *lastLoginAt, *failedLoginCount, *lockedUntil` | `(tenantId, email)` 唯一；`(tenantId, phone)` 唯一 |
-| `Department` | `id, tenantId, name, parentId, path, level, managerId, *code, *sort, *status` | `(tenantId, parentId)` 索引；`(tenantId, path)` 前缀索引（`text_pattern_ops`）；`(tenantId, code)` 唯一 |
+| `Department` | `id, tenantId, name, parentId, path, level, managerId, *code, *sort, *status, *workNo`（部门工号） | `(tenantId, parentId)` 索引；`(tenantId, path)` 前缀索引（`text_pattern_ops`）；`(tenantId, code)` 唯一；**`(tenantId, workNo)` 唯一** |
 | `UserDepartment` | `userId, departmentId, isPrimary, *isLeader, *title` | `(userId, departmentId)` 唯一；`(departmentId, isLeader)` 索引 |
 | `Role` | `id, tenantId, name, code, *isSystem, *dataScopeDefault` | `(tenantId, code)` 唯一 |
 | `Permission` | `id, code, name, type, *module` | `code` 唯一 |
 | `RolePermission` | `roleId, permissionId` | 复合主键 |
+| `DepartmentWorkNoMember` | `id, tenantId, departmentId, userId, *isPrimary, *receiveNotify, *status`（部门工号的操盘人） | 唯一 `(departmentId, userId)`；`(userId)` 索引（查"我的工号待办"） |
 | `UserRole` | `userId, roleId, scopeType, scopeId` | 唯一 `(userId, roleId, scopeType, scopeId)`；`(scopeType, scopeId)` 索引 |
 
 ### 4.2 流程模板（发布后不可变）
@@ -121,11 +124,17 @@ Tenant ─┬─ User ─┬─ UserDepartment ── Department(自引用 paren
 
 | 实体 | 关键字段 | 约束与索引 |
 | --- | --- | --- |
-| `Escalation` | `id, tenantId, sourceType, sourceId, instanceId, taskId, fromDeptId, toDeptId, reason, status, requestedBy, handledBy, handledAt, result, comment, *code, *level, *triggerType, *targetRule, *deadline, *frozenInstanceStatus, *maxLevel` | **`(toDeptId, status)`**、`(instanceId)`、`(tenantId, status, createdAt)` |
-| `EscalationChain` | `id, escalationId, level, deptId, handlerId, status, handledAt, *enteredAt, *actionType, *comment, *deadline` | 唯一 `(escalationId, level)` |
+| `Escalation` | `id, tenantId, sourceType, sourceId, instanceId, taskId, fromDeptId, toDeptId, reason, status, requestedBy, handledBy, handledAt, result, comment, *code, *level, *triggerType, *targetRule, *deadline, *frozenInstanceStatus, *maxLevel, *fromWorkNo, *toWorkNo（目标工号快照）` | **`(toWorkNo, status)`**（工号待办主查询）、`(toDeptId, status)`、`(instanceId)`、`(tenantId, status, createdAt)` |
+| `EscalationChain` | `id, escalationId, level, deptId, handlerId, status, handledAt, *enteredAt, *actionType, *comment, *deadline, *workNo` | 唯一 `(escalationId, level)`；`(workNo, status)` 索引 |
 | `EscalationRecord` | `id, escalationId, actorId, action, comment, attachments(JSONB), createdAt, *fromStatus, *toStatus` | `(escalationId, createdAt)` |
 
-**目标部门解析（用户已确认：不允许越级）**：`toDeptId` 只能取 `Department.parentId`（直接上级）或沿 `Department.path` **逐级上溯一级**（`LEVEL_UP` 每级单独成链，不允许一次跳多级）。`SKIP_TO_LEVEL` / 指定非直接上级部门仅在租户开关 `allowCrossLevel=true` 时可用，且需 `ESC_CROSS_LEVEL` 权限 + 理由必填。
+**目标投递解析（用户已确认：不允许越级 + 统一上报到上级工号）**：
+
+1. `toDeptId` 只能取 `Department.parentId`（直接上级）或沿 `Department.path` **逐级上溯一级**（每级单独成链，不允许一次跳多级）。
+2. 投递对象不是人，而是**上级部门的工号**：`toWorkNo = 上级部门.workNo`（写入 `Escalation.toWorkNo` 作快照，事后改工号不影响历史）。
+3. 通知发给该工号的**全部成员**（`DepartmentWorkNoMember.receiveNotify=true`）；任一成员可**抢占受理**，受理成功后 `handledBy` 落定并锁定，其他人转为只读协作者（避免多人重复处理）。
+4. 上级部门未配置工号时按兜底策略 `onMissingWorkNo`：`ESCALATE_UP`（继续上溯一级找有工号的部门，默认）/ `NOTIFY_ADMIN`（通知租户管理员）/ `BLOCK`（阻断并报错）。
+5. `SKIP_TO_LEVEL` / 指定非直接上级部门仅在租户开关 `allowCrossLevel=true` 时可用，且需 `ESC_CROSS_LEVEL` 权限 + 理由必填。
 
 ### 4.6 通用与平台
 
@@ -164,13 +173,16 @@ Tenant ─┬─ User ─┬─ UserDepartment ── Department(自引用 paren
 | 投票 | `TimeoutPolicy` | `REMIND_ONLY`（默认）、`AUTO_REJECT`、`ESCALATE`、`AUTO_APPROVE`（**默认禁用**，需租户开关 `allowAutoApprove`） |
 | 投票 | `VoteVisibility` | `PUBLIC, RESULT_ONLY, ANONYMOUS`（记名方式） |
 | 投票 | `VoteViewScope` | `DEPT_ONLY`（**默认**）、`TENANT`；上报链上级部门由可见性覆盖规则放行，不依赖此值 |
-| 投票 | `VoteDecision` | `APPROVE, REJECT, ABSTAIN`（`ABSTAIN` 默认禁用，由 `allowAbstain` 控制） |
+| 投票 | `VoteDecision` | `APPROVE, REJECT`；`ABSTAIN` 已按用户确认**移除**（不能弃权），枚举仅保留用于历史数据兼容 |
 | 投票 | `RevotePolicy` | `NOT_ALLOWED, ONCE, UNLIMITED_BEFORE_CONCLUSION`（**默认**） |
 | 投票 | `ConclusionMode` | `AUTO, MANUAL_CONFIRM`（**默认**）、`MANUAL_OVERRIDE` |
 | 投票 | `ConclusionDecision` | `APPROVE, REJECT` |
 | 投票 | `ConclusionStatus` | `NOT_REQUIRED, PENDING, SUBMITTED, TIMEOUT` |
-| 投票 | `TiePolicy` | `REJECT, ESCALATE, CHAIRMAN_VOTE` |
+| 投票 | `TiePolicy` | `ESCALATE`（**已确认：报上级组织裁定**）、`REJECT`、`CHAIRMAN_VOTE` |
 | 投票 | `VoterStatus` | `PENDING, VOTED, TIMEOUT, DELEGATED, SKIPPED` |
+| 通用 | `DeadlineMode` | `CALENDAR_DAY`（**已确认：自然日**）、`WORKING_DAY`（保留，需节假日数据） |
+| 组织 | `WorkNoMissingPolicy` | `ESCALATE_UP`（默认）、`NOTIFY_ADMIN`、`BLOCK` |
+| 上报 | `EscalationAcceptMode` | `GRAB`（**默认：工号成员抢占受理**）、`ASSIGNED`（指定到人） |
 | 任务 | `TaskStatus` | `PENDING_ASSIGN, PENDING_ACCEPT, IN_PROGRESS, PENDING_ACCEPTANCE, DONE, OVERDUE, CANCELLED, BLOCKED, ESCALATED` |
 | 任务 | `TaskPriority` | `LOW, NORMAL, HIGH, URGENT` |
 | 任务 | `TaskAssigneeRole` | `OWNER, COLLABORATOR, WATCHER, ACCEPTOR` |
@@ -301,8 +313,8 @@ PENDING ──submit──▶ SUBMITTED ──accept──▶ ACCEPTED ─┬─
 
 | 当前状态 | 事件 | 守卫条件 | 下一状态 | 副作用 |
 | --- | --- | --- | --- | --- |
-| PENDING | `SUBMIT` | 触发源校验；目标部门解析成功 | SUBMITTED | 建 `Escalation` + `EscalationChain(L1)`；**冻结原流程**（默认）；通知目标部门；WS `escalation.created` |
-| SUBMITTED | `ACCEPT` | 处理人有 `ESC_HANDLE` 且属目标部门 | ACCEPTED | 记录 `handledBy/handledAt`；追加 chain 级 |
+| PENDING | `SUBMIT` | 触发源校验；目标部门解析成功；目标部门工号已配置（否则按 `onMissingWorkNo` 兜底） | SUBMITTED | 建 `Escalation`（快照 `fromWorkNo / toWorkNo`）+ `EscalationChain(L1)`；**冻结原流程**（已确认）；通知**工号全部成员**；WS `escalation.created` |
+| SUBMITTED | `ACCEPT` | 处理人是目标工号成员且具 `ESC_HANDLE`；该上报尚未被他人受理（抢占式） | ACCEPTED | 抢占落定 `handledBy/handledAt`；同工号其他成员转为只读；追加 chain 级 |
 | SUBMITTED | `TIMEOUT` | 超过 `NodeEscalationRule.timeout` | UPGRADED | 沿 path 上溯生成下一级；若已达 `maxLevel` → 通知租户管理员并 `CLOSED`（记录「无法继续上报」） |
 | ACCEPTED | `START_VOTE` | 有权限 | VOTING | 创建上级投票节点（复用 `InstanceNode` 机制，`escalationId` 回指） |
 | ACCEPTED | `ASSIGN_TASK` | 有权限 | TASKING | 创建任务；`Task.sourceEscalationId` 回指 |
@@ -324,6 +336,7 @@ PENDING ──submit──▶ SUBMITTED ──accept──▶ ACCEPTED ─┬─
 | `DEPARTMENT` | `{ "deptIds": [3], "includeSub": false, "leaderOnly": true }` | 取部门（或其子树）成员/负责人 | 技术部全体负责人 |
 | `VOTE_GROUP` | `{ "groupCodes": ["TECH_COMMITTEE"] }` | 取投票组成员（带权重） | 技术委员会 |
 | `DYNAMIC` | `{ "from": "formData.approvers", "as": "USER" }` | 从表单字段动态取人 | 申请单里指定会签人 |
+| `DEPT_WORKNO` | `{ "deptRef": "INITIATOR_DEPT｜PARENT_DEPT｜FIXED", "deptId": 3, "primaryOnly": true }` | 取该部门**工号成员**（可限主责人） | 本部门工号作为结论填写人 |
 
 约束：解析结果去重（同一人被多条规则命中时取**最大权重**，并记录 `sourceReason` 说明命中原因）；解析结果为空 → 节点转 `SKIPPED` 并告警（可配为报错中断）。
 
@@ -355,7 +368,7 @@ PENDING ──submit──▶ SUBMITTED ──accept──▶ ACCEPTED ─┬─
 
 ### 8.2 弃权策略 → 分母与折算
 
-> 默认 `allowAbstain=false`（全员必须表态），此时 `B = 0`，下表策略**不生效**；仅在模板显式开启弃权后按下表折算。
+> **已确认：不能弃权**。`allowAbstain` 恒为 `false`，`B = 0`，下表策略**不生效**；保留该表仅为说明「若未来放开弃权」的折算语义，本版本不提供开启入口。
 
 | `abstainPolicy` | `D` | `A'` | `R'` |
 | --- | --- | --- | --- |
@@ -497,7 +510,7 @@ Value     := Literal | { "$path": Path }            // 支持与另一字段比�
 | 上报触发 | `NodeEscalationRule.triggerType + condition` | 创建 `Escalation` |
 | 任务分配 | `NodeTaskTemplate.assigneeRule`（内含条件） | 解析出 `OWNER / ACCEPTOR` |
 | 超时策略 | `NodeVoteRule.timeoutPolicy + 条件` | 决定自动通过 / 自动驳回 / 上报 |
-| 结论填写人 | `NodeVoteRule.conclusionAuthorRule` | 解析出本层投票结论的填写人 |
+| 结论填写人 | `NodeVoteRule.conclusionAuthorRule` | 解析出本层投票结论的填写人；默认 `DEPT_WORKNO`（本部门工号主责人 → 无工号则部门负责人） |
 
 ## 10. 索引与性能计划
 
@@ -558,7 +571,7 @@ Value     := Literal | { "$path": Path }            // 支持与另一字段比�
 
 | # | 建议 | 原因 | 影响 |
 | --- | --- | --- | --- |
-| 1 | 新增 `HolidayCalendar` | 支持「工作日」截止时间（Q7） | 阶段 1 加表；deadline 计算工具需读日历 |
+| 1 | ~~新增 `HolidayCalendar`~~（**降级为可选**） | Q7 已确认按**自然日**计算，本版本不需要节假日数据；仅当未来切换 `WORKING_DAY` 才建表 | 阶段 1 不建表，deadline 工具保留 `DeadlineMode` 分支 |
 | 2 | 新增 `Delegation` | 投票人缺席委托（Q8） | 阶段 1 加表；投票鉴权需查委托 |
 | 3 | 新增 `InstanceSuspension` | 精确恢复冻结前状态（Q5） | 阶段 1 加表；解冻逻辑更可靠 |
 | 4 | 新增 `VoteGroup / VoteGroupMember` | 让 `VOTE_GROUP` 投票人类型可落地 | 阶段 1 加表；投票人解析支持组 |
@@ -576,5 +589,8 @@ Value     := Literal | { "$path": Path }            // 支持与另一字段比�
 | 16 | `Tenant` 增加 `allowCrossLevel / allowAutoApprove` 开关 | 越级与超时自动通过默认关闭，保留合规出口 | 阶段 1 字段；阶段 3 生效 |
 | 17 | `EscalationChain` 增加可见性用途的 `deptId` 索引 | 上级部门查全部投票明细需按链上部门反查 | 阶段 1 索引 |
 | 18 | `Comment` / `Attachment` 支持挂载到 `VoteConclusion` | 结论需要附证明材料 | 多态挂载已支持，无需新表 |
+| 19 | `Department` 增加 `workNo`（部门工号，租户内唯一） | 上报统一投递到上级部门工号（用户确认） | 阶段 1 字段 + 唯一约束 |
+| 20 | 新增 `DepartmentWorkNoMember` | 工号是"部门级账号"，需要一张表记录谁能用该工号收件与处理 | 阶段 1 建表；上报受理与通知依赖它 |
+| 21 | `Escalation` 增加 `fromWorkNo / toWorkNo` | 工号快照，事后调整工号不影响历史链路 | 阶段 1 字段 + `(toWorkNo, status)` 索引 |
 
-以上 18 条建议默认全部采纳；如需删减请指出编号，我将在阶段 1 调整 schema。
+以上 21 条建议默认全部采纳（第 1 条降级为可选、本版本不建表）；如需删减请指出编号，我将在阶段 1 调整 schema。

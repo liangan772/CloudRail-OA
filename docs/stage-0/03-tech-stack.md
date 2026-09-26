@@ -276,7 +276,8 @@ WorkflowTemplateModule → InstanceModule → VoteModule
 | `ConclusionPolicy` | `canConclude(actor, ctx) / applyConclusion(systemDecision, input): FinalDecision` | 结论填写人资格判定、`MANUAL_CONFIRM` 下「确认 vs 改判」校验、改判理由强制校验、`isOverride` 标记 |
 | `NodeStateMachine` | `next(state, event, ctx): TransitionResult` | 返回下一状态 + 需执行的副作用列表（创建任务/创建下一层/创建上报），由 Service 执行 |
 | `TaskEngine` | `resolveAssignees(ctx) / next(state, event) / isUnblocked(task, deps)` | 分配算法与任务状态机 |
-| `EscalationEngine` | `resolveTargetDept(ctx) / next(state, event)` | **仅直接上级 / 逐级上溯**两种解析（越级默认禁止，开关可启） |
+| `EscalationEngine` | `resolveTargetDept(ctx) / resolveTargetWorkNo(ctx) / canGrabAccept(actor, esc) / next(state, event)` | **仅直接上级 / 逐级上溯**两种解析（越级默认禁止，开关可启）；目标 = **上级部门工号**，投递到工号而非个人，工号成员抢占受理 |
+| `WorkNoService` | `getWorkNo(deptId) / listMembers(workNo) / isMember(userId, workNo)` | 部门工号维护与成员解析；上报通知、受理鉴权、结论填写人默认值都读它 |
 | `RuleEngine` | `evaluate(rule: RuleNode, ctx: RuleContext): boolean / explain()` | JSON DSL 求值 + `explain()` 返回命中路径用于「为什么上报」解释 |
 
 ## 8. 环境风险与对策（已实测）
