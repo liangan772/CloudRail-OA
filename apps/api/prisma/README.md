@@ -1,9 +1,35 @@
 # 数据库迁移与种子
 
+## 目标数据库（已确认，2026-09-26 探测）
+
+开发库跑在宝塔服务器的 Docker 里，**已确认可达**（本机 → 服务器 TCP 35432 通）：
+
+| 项 | 值 |
+| --- | --- |
+| 主机 | `82.158.228.70` |
+| 端口 | `35432`（映射容器内 5432） |
+| 容器 | `postgresql_enp7-postgresql_EnP7-1`（镜像 `postgres:16.3`，`restart: always`） |
+| 数据目录 | `/www/dk_project/dk_app/postgresql/postgresql_EnP7/data` |
+| 网络 | `baota_net`（容器 IP `172.18.0.2`） |
+| 凭据 | 面板应用 `postgresql_EnP7` 的 `.env` 里，**不入库、不写入文档、不打印** |
+
+> 安全提示：该端口目前对公网开放（`0.0.0.0:35432`），服务器系统防火墙（ufw）未启用。
+> 生产上线前应把来源限制到固定 IP，或改为仅内网 / SSH 隧道访问。
+
+#### 怎么用
+
+1. 在仓库根目录建 `.env`（已被 `.gitignore` 忽略），把 `DATABASE_URL` 指向上面这个库：
+
+   ```dotenv
+   DATABASE_URL=postgresql://<user>:<password>@82.158.228.70:35432/<database>?schema=public&sslmode=disable
+   ```
+
+2. 然后依次执行「拿到 PostgreSQL 之后要做的三件事」。
+
 ## 为什么目录里没有 `migrations/`
 
-本阶段（阶段 1）**没有可用的 PostgreSQL 实例**（开发机未安装 Docker，宝塔服务器尚未确认），
-而 `prisma migrate dev` 需要真实数据库 + shadow database 才能真正生成 `migrations/<时间戳>_xxx/migration.sql`。
+生成 `migrations/` 需要真实数据库 + shadow database 才能真正产出 `migrations/<时间戳>_xxx/migration.sql`，
+而阶段 1 交付时该库还不可达（开发机未安装 Docker、宝塔服务器尚未确认）。
 
 因此这里刻意**不伪造**迁移目录，避免后续 `prisma migrate deploy` 因目录不合法而失败。
 
