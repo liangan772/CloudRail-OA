@@ -1,0 +1,72 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/**
+ * 语义 token（HSL 分量，便于 tailwind 的 hsl(var(--x)) 拼接）。
+ * 状态色与 packages/shared 的 STATUS_TONE 对应：pending/info/success/warning/danger/muted。
+ */
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222 20% 15%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 20% 15%;
+    --muted: 220 16% 96%;
+    --muted-foreground: 220 10% 45%;
+    --border: 220 14% 90%;
+    --primary: 221 83% 53%;
+    --primary-foreground: 0 0% 100%;
+    --danger: 0 72% 51%;
+    --warning: 32 95% 44%;
+    --success: 145 63% 36%;
+    --info: 199 89% 42%;
+    --radius: 10px;
+  }
+
+  .dark {
+    --background: 222 22% 11%;
+    --foreground: 210 20% 96%;
+    --card: 222 20% 14%;
+    --card-foreground: 210 20% 96%;
+    --muted: 222 16% 18%;
+    --muted-foreground: 218 12% 65%;
+    --border: 222 14% 24%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 222 22% 11%;
+    --danger: 0 72% 60%;
+    --warning: 32 95% 55%;
+    --success: 145 55% 45%;
+    --info: 199 89% 55%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+}
+
+@layer components {
+  .oa-card {
+    @apply rounded-lg border bg-card p-4 shadow-sm;
+  }
+
+  .oa-input {
+    @apply h-9 w-full rounded-md border bg-background px-3 text-sm outline-none
+      focus:ring-2 focus:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .oa-button {
+    @apply inline-flex h-9 items-center justify-center gap-1.5 rounded-md bg-primary px-4
+      text-sm font-medium text-primary-foreground transition hover:opacity-90
+      disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .oa-button-ghost {
+    @apply inline-flex h-9 items-center justify-center gap-1.5 rounded-md border bg-card px-3
+      text-sm transition hover:bg-muted;
+  }
+}
