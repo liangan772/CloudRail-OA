@@ -38,6 +38,8 @@ docker compose --env-file .env -f docker/docker-compose.prod.yml exec api pnpm d
 # 从旧版本升级（新增了 SYS_MONITOR 权限点）时也必须重跑一次 db:seed：
 # 权限点由代码定义、由种子写入库，不重跑的话管理后台的「运维监控」入口不会出现。
 # 种子是幂等的（角色权限先清后建），重复执行安全。
+# 种子同时会清理「孤儿权限点」—— 即库里存在、但代码常量里已删除的权限，并打印受影响的角色。
+# ⚠️ 代价：如果你手工调整过**内置角色**的权限，重跑会被打回种子定义。要保留自定义配置请新建角色。
 
 # 若上面报 "tsx: not found"（Prisma 的 seed 包装器在某些环境找不到 tsx），直接跑脚本：
 # docker compose --env-file .env -f docker/docker-compose.prod.yml exec api \

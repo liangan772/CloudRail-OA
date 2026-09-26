@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { PERMISSIONS, buildPath, levelOf } from '@oa/shared';
 import { hashPassword } from '../../src/common/crypto/password';
+import { planPermissionPrune } from '../../src/domain/rbac/permission-sync';
 import {
   DEMO_DEPARTMENTS,
   DEMO_PASSWORD,
@@ -30,6 +31,53 @@ async function seedPermissions() {
     });
   }
   return PERMISSIONS.length;
+}
+
+/**
+ * 清理**孤儿权限点**：库里存在、但代码（`@oa/shared` 的 `PERMISSIONS`）里已经没有的权限。
+ *
+ * 为什么必须做：权限点只能由代码定义（`AdminRoleService.assertPermissionCodes` 会拒绝未知 code），
+ * 所以从常量里删掉一个权限点后，库里那一行不会被任何流程清掉 —— 它会变成"幽灵"：
+ * 管理后台的**权限目录**读代码常量（看不到它），**角色详情**读 DB（却能看到它）。
+ * 只 upsert 不 prune 的种子会让这个偏差永久累积。
+ *
+ * 分类逻辑在 `src/domain/rbac/permission-sync.ts`（纯函数，有单测），这里只负责落库。
+ * 关联的 `role_permissions` 由外键 `onDelete: Cascade` 自动清理；
+ * 但**自定义角色**（管理员在后台建的角色）也会一并失去该权限，所以会打印受影响的角色。
+ */
+async function prunePermissions(): Promise<number> {
+  const existing = await prisma.permission.findMany({
+    select: {
+      id: true,
+      code: true,
+      roles: { select: { role: { select: { code: true, name: true } } } },
+    },
+  });
+
+  const plan = planPermissionPrune(
+    PERMISSIONS.map((p) => p.code),
+    existing,
+  );
+
+  if (plan.missing.length > 0) {
+    console.log(`ℹ 代码新增权限点 ${plan.missing.length} 个：${plan.missing.join('、')}`);
+  }
+  if (plan.stale.length === 0) return 0;
+
+  const staleIds = new Set(plan.stale.map((p) => p.id));
+  const affectedRoles = new Map<string, string>();
+  for (const permission of existing) {
+    if (!staleIds.has(permission.id)) continue;
+    for (const link of permission.roles) affectedRoles.set(link.role.code, link.role.name);
+  }
+
+  await prisma.permission.deleteMany({ where: { id: { in: [...staleIds] } } });
+
+  console.log(`⚠ 清理孤儿权限点 ${plan.stale.length} 个：${plan.stale.map((p) => p.code).join('、')}`);
+  if (affectedRoles.size > 0) {
+    console.log(`  受影响角色（关联已一并移除）：${[...affectedRoles.values()].join('、')}`);
+  }
+  return plan.stale.length;
 }
 
 async function seedRoles(tenantId: number) {
@@ -354,6 +402,8 @@ async function main() {
   const tenant = await seedTenant();
   const permissionCount = await seedPermissions();
   const roleCount = await seedRoles(tenant.id);
+  // 放在 seedRoles 之后：内置角色此时已按代码定义重建完毕，prune 只需处理自定义角色上的残留
+  const prunedPermissionCount = await prunePermissions();
   const depts = await seedDepartments(tenant.id);
   const users = await seedUsers(tenant.id, depts);
   const workNoCount = await seedWorkNoMembers(tenant.id, depts, users);
@@ -364,6 +414,7 @@ async function main() {
   console.table([
     { 项: '租户', 数量: 1 },
     { 项: '权限点', 数量: permissionCount },
+    { 项: '清理孤儿权限点', 数量: prunedPermissionCount },
     { 项: '角色', 数量: roleCount },
     { 项: '部门', 数量: DEMO_DEPARTMENTS.length },
     { 项: '用户', 数量: DEMO_USERS.length },

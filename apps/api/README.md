@@ -34,6 +34,24 @@ pnpm --filter @oa/api db:cleanup -- --yes --reset-sequences   # 顺带把单号�
 > 注意：Prisma CLI 只会自动加载**当前工作目录**与 `prisma/` 下的 `.env`。
 > 在 `apps/api` 里跑 Prisma 时，请显式传 `DATABASE_URL`（或把 `.env` 放到 `apps/api/`）。
 
+## 种子对权限点的行为
+
+`db:seed` 是**幂等 + 对齐**，不只是"补数据"：
+
+| 步骤 | 行为 |
+| --- | --- |
+| `seedPermissions` | 按 `PERMISSIONS` 逐条 **upsert**（新增的权限点入库、已有的更新名称/模块/类型） |
+| `seedRoles` | 每个角色**先 `deleteMany` 再按定义重建** `role_permissions` —— 会覆盖你手工调整过的内置角色权限 |
+| `prunePermissions` | 删除库里存在、但 `PERMISSIONS` 里已没有的**孤儿权限点**，并打印受影响的角色 |
+
+`prunePermissions` 的存在理由：权限点只能由代码定义，所以从常量里删掉一个权限点后，
+库里那一行不会被任何业务流程清掉。只 upsert 不 prune 会让偏差永久累积，最终表现为
+**权限目录看不到它、角色详情却能看到它**。分类逻辑在 `src/domain/rbac/permission-sync.ts`（纯函数，有单测），
+落库在 `prisma/seed/index.ts`；关联的 `role_permissions` 由外键 `onDelete: Cascade` 自动清理。
+
+> 因此：**手工改过内置角色权限的话，重跑 seed 会打回种子定义**。要保留自定义配置，
+> 应该新建角色而不是改内置角色。
+
 ## 单测 vs e2e
 
 | | 单测（`test`） | e2e（`test:e2e`） |

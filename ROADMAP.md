@@ -72,6 +72,11 @@
 **注意**：`AdminUserService` / `AdminRoleService` 等写操作全部经 `DomainEventService` 在同事务内落 `AuditLog` + `OutboxEvent`，
 并在 `DomainEventService.aggregateType` 上新增了 `USER / ROLE / DEPARTMENT / WORKNO / SYSTEM` 五种聚合类型。
 
+**补充（角色权限清理）**：`db:seed` 新增 `prunePermissions` 步骤，会删除库里存在、但 `PERMISSIONS` 常量里已删除的
+**孤儿权限点**（分类逻辑在 `src/domain/rbac/permission-sync.ts`，纯函数 + 9 个单测）。
+在此之前种子只 upsert 不 prune，从常量删权限点会留下"权限目录看不到、角色详情却看得到"的幽灵行。
+代价是：**手工改过内置角色权限的话，重跑 seed 会打回种子定义** —— 要保留自定义配置应新建角色。
+
 ### 阶段 2 结束时确认的三个口径（2026-09-26）
 
 | # | 决策 | 现状与后续 |
