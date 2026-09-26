@@ -96,7 +96,10 @@ services:
       - '80:80'
       - '443:443'
     environment:
-      OA_DOMAIN: ${OA_DOMAIN:?启用 tls profile 需要设置 OA_DOMAIN}
+      # 注意：compose 的变量替换发生在 profile 过滤**之前**，
+      # 所以这里不能用 ${OA_DOMAIN:?...}——否则不启用 tls profile 也会报"缺变量"。
+      # 不启用时可以留空；启用 tls profile 时必须填域名，否则 Caddy 起不来。
+      OA_DOMAIN: ${OA_DOMAIN:-}
       ACME_EMAIL: ${ACME_EMAIL:-}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
