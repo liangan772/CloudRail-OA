@@ -115,6 +115,7 @@ CREATE TABLE IF NOT EXISTS audit_logs_<YYYY_MM> PARTITION OF audit_logs
 | `Transaction already closed` | 事务超时 | 项目已用 `runInTransaction`（30s）；若仍出现说明单事务语句过多，需要拆分 |
 | `404` 且代码明明写了 | 跑的是旧 `dist` | **先 build 再跑**（`nest build`），typecheck 不代表产物是新的 |
 | 页面能开但数据不刷 | 前端 `/api` rewrite 目标不对 | 检查 `NEXT_PUBLIC_API_BASE_URL`；容器内应指向 `http://api:3001` |
+| 页面能开但报"请求失败"、web 日志里是连 `127.0.0.1:3001` | rewrite 目标是**构建期**烘焙进 `.next/routes-manifest.json` 的，只在运行期设环境变量无效 | 改 `docker/docker-compose.prod.yml` 的 `web.build.args` 后**重建**（`up -d --build web`）。校验：`docker compose ... exec web node -e "console.log(require('/app/apps/web/.next/routes-manifest.json').rewrites)"` 应看到 `http://api:3001` |
 | 迁移未应用 | 手工迁移文件没跑 | `pnpm --filter @oa/api db:deploy` |
 
 ## 7. 数据清理

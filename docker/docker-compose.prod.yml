@@ -72,13 +72,16 @@ services:
     build:
       context: ..
       dockerfile: apps/web/Dockerfile
+      args:
+        # 编译期注入：Next 的 rewrites 目标会被烘焙进构建产物
+        NEXT_PUBLIC_API_BASE_URL: http://api:3001
     restart: always
     depends_on:
       - api
     environment:
       NODE_ENV: production
       TZ: ${TZ:-Asia/Shanghai}
-      # 服务端 rewrite 目标：容器内直接用服务名
+      # 运行期也保留一份（便于排查；rewrite 目标已由构建期决定）
       NEXT_PUBLIC_API_BASE_URL: http://api:3001
     ports:
       - '${WEB_BIND:-127.0.0.1}:3000:3000'
