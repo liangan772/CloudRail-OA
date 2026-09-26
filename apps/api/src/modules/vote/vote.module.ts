@@ -6,9 +6,10 @@ import { NodeContextModule } from './node-context.module';
 import { VoteController } from './vote.controller';
 import { VoteService } from './vote.service';
 import { EscalationModule } from '../escalation/escalation.module';
+import { TaskModule } from '../task/task.module';
 
 @Module({
-  imports: [InstanceModule, RuleEngineModule, NodeContextModule, EscalationModule],
+  imports: [InstanceModule, RuleEngineModule, NodeContextModule, EscalationModule, TaskModule],
   controllers: [VoteController],
   providers: [VoteService, ConclusionService],
   exports: [VoteService, ConclusionService],

@@ -5,6 +5,7 @@ import { AppError } from '../../common/errors/app-error';
 import type { AuthenticatedUser } from '../../common/context/authenticated-user';
 import { submitConclusion as buildConclusion } from '../../domain/workflow/conclusion-policy';
 import { InstanceAdvanceService } from '../instance/instance-advance.service';
+import { TaskService } from '../task/task.service';
 import { NodeContextService, type NodeContext, type Tx } from './node-context.service';
 import type { SubmitConclusionBody } from './vote.dto';
 
@@ -23,6 +24,7 @@ export class ConclusionService {
     private readonly prisma: PrismaService,
     private readonly contexts: NodeContextService,
     private readonly advance: InstanceAdvanceService,
+    private readonly tasks: TaskService,
   ) {}
 
   /**
@@ -91,15 +93,31 @@ export class ConclusionService {
         data: { status: built.nodeStatus, endedAt: new Date(), conclusionStatus: 'SUBMITTED' },
       });
 
-      // 节点落到 PASSED / REJECTED 后由推进服务决定开下一层还是给流程定局
-      const advanced = await this.advance.advance(tx, ctx, user, built.nodeStatus);
-
-      // 本层通过后应派的任务数：任务实体由阶段 3 的 TaskEngine 创建，
-      // 这里只如实报告"有几条待派"，不落半成品任务（避免没有 OWNER/ACCEPTOR 的脏数据）
-      const pendingTaskTemplates =
+      /**
+       * C1/C3：本层通过 → 先按模板派任务 → **任务全部完成才推动下一层**。
+       * 若本层没有任务模板，则维持原来的行为直接推进（不派任务就没有可等的）。
+       */
+      const created =
         built.nodeStatus === 'PASSED'
-          ? await tx.nodeTaskTemplate.count({ where: { nodeId: ctx.node.nodeId, triggerOn: 'PASS' } })
-          : 0;
+          ? await this.tasks.createFromNodeTemplates(tx, {
+              tenantId: user.tenantId,
+              instanceId: ctx.instance.id,
+              instanceNodeId: ctx.node.id,
+              workflowNodeId: ctx.node.nodeId,
+              creatorId: user.userId,
+              initiatorId: ctx.instance.initiatorId,
+            })
+          : { taskIds: [] as number[], skipped: [] as { title: string; reason: string }[], openTasks: 0 };
+
+      const heldByTasks = built.nodeStatus === 'PASSED' && created.taskIds.length > 0;
+      const advanced = heldByTasks
+        ? {
+            instanceStatus: ctx.instance.status,
+            finalStatus: ctx.instance.status,
+            nextNode: null,
+            summary: `本层通过，已派发 ${created.taskIds.length} 个任务，任务全部完成后自动进入下一层`,
+          }
+        : await this.advance.advance(tx, ctx, user, built.nodeStatus);
 
       return {
         instanceId,
@@ -111,7 +129,11 @@ export class ConclusionService {
         conclusion: built.conclusion,
         isOverride: built.isOverride,
         summary: advanced.summary,
-        pendingTaskTemplates,
+        /** 本层派出的任务数（0 表示该层没有任务模板，已直接推进） */
+        tasksCreated: created.taskIds.length,
+        /** 解析不出负责人/验收人而被跳过的模板（不阻断流程，但要让调用方看见） */
+        tasksSkipped: created.skipped,
+        heldByTasks,
       };
     });
   }

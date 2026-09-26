@@ -30,6 +30,8 @@ export interface AssigneeDirectory {
   departments: { id: number; parentId: number | null; path: string }[];
   initiatorDeptId: number | null;
   parentDeptId: number | null;
+  /** 流程发起人（`MANUAL` 规则的 fallbackTo: 'INITIATOR' 用，也是默认验收人候选） */
+  initiatorUserId?: number | null;
 }
 
 export interface AssigneeRuleSpec {
@@ -90,6 +92,11 @@ export function resolveAssignees(
     switch (rule.type) {
       case 'MANUAL': {
         const ids = asNumberArray(value.userIds).filter((id) => byId.has(id));
+        // 设计器允许写 { type: 'MANUAL', fallbackTo: 'INITIATOR' }：没指定人就回退给发起人
+        if (ids.length === 0 && value.fallbackTo === 'INITIATOR' && directory.initiatorUserId != null) {
+          const fallback = byId.has(directory.initiatorUserId) ? [directory.initiatorUserId] : [];
+          return { userIds: fallback, reason: '未指定人，回退给流程发起人' };
+        }
         return { userIds: ids, reason: '手动指定' };
       }
       case 'ROLE': {

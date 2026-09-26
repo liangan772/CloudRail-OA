@@ -9,6 +9,7 @@ import { InstanceModule } from './modules/instance/instance.module';
 import { VoteModule } from './modules/vote/vote.module';
 import { RuleModule } from './modules/rule/rule.module';
 import { EscalationModule } from './modules/escalation/escalation.module';
+import { TaskModule } from './modules/task/task.module';
 import { HealthController } from './modules/health/health.controller';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from './modules/auth/guards/permissions.guard';
@@ -26,6 +27,7 @@ import { DataScopeGuard } from './modules/auth/guards/data-scope.guard';
     VoteModule,
     RuleModule,
     EscalationModule,
+    TaskModule,
   ],
   controllers: [HealthController],
   providers: [

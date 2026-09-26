@@ -106,6 +106,16 @@ describe('任务分配 · 负载均衡 / 投票组 / 工号 / 抢单（E1）', (
 });
 
 describe('任务分配 · 守卫（E2：恰好一个负责人 + 恰好一个验收人）', () => {
+  it('MANUAL 未指定人且 fallbackTo=INITIATOR → 回退给流程发起人', () => {
+    const r = resolveAssignees(
+      rule('MANUAL', { fallbackTo: 'INITIATOR' }),
+      rule('MANUAL', { userIds: [2] }),
+      { ...directory, initiatorUserId: 3 },
+    );
+    expect(r).toMatchObject({ ok: true, ownerId: 3 });
+    expect(r.ok && r.ownerReason).toContain('发起人');
+  });
+
   it('解析不出负责人 → TASK_OWNER_REQUIRED', () => {
     const r = resolveAssignees(
       rule('ROLE', { roleCodes: ['NOBODY'], scope: 'INITIATOR_DEPT' }),

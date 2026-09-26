@@ -113,6 +113,7 @@ describe('真实库 e2e · 全链路', () => {
   let directory: Map<number, { email: string; name: string }>;
   let overLimitInstanceId: number;
   let overLimitEscalationId: number;
+  let taskId: number;
 
   it('登录与身份：admin 为租户管理员，数据范围为 TENANT', async () => {
     const res = await http()
@@ -223,7 +224,7 @@ describe('真实库 e2e · 全链路', () => {
     expect(last.body.data.progress).toMatchObject({ stated: 4, approve: 4, reject: 0 });
   });
 
-  it('人工结论通过 → 开启第二层（产品中心工号 3 人）', async () => {
+  it('人工结论通过 → 本层派任务并挂起（任务完成前不开下一层）', async () => {
     const res = await http()
       .post(`/instances/${instanceId}/conclusion`)
       .set('Authorization', `Bearer ${await token(WANGQIANG)}`)
@@ -231,15 +232,70 @@ describe('真实库 e2e · 全链路', () => {
       .expect(201);
 
     expect(res.body.data.nodeStatus).toBe('PASSED');
-    expect(res.body.data.instanceStatus).toBe('VOTING');
-    expect(res.body.data.nextNode).toMatchObject({ layerIndex: 2, voters: 3 });
-    // 本层通过后待派任务数如实报出（任务实体由阶段 3 创建）
-    expect(res.body.data.pendingTaskTemplates).toBeGreaterThan(0);
+    // C1/C3：通过后先派任务，任务全部完成才推动下一层
+    expect(res.body.data.heldByTasks).toBe(true);
+    expect(res.body.data.tasksCreated).toBeGreaterThan(0);
+    expect(res.body.data.nextNode).toBeNull();
 
     const detail = await instanceDetail(instanceId);
     expect(detail.status).toBe('VOTING');
-    expect(detail.layerIndex).toBe(2);
-    const layer2 = (detail.nodes as Array<{ layerIndex: number; status: string; voters: Array<{ userId: number }> }>).find(
+    expect(detail.layerIndex).toBe(1); // 仍停在第 1 层
+
+    const tasks = await http()
+      .get('/tasks')
+      .query({ scope: 'all', instanceId })
+      .set('Authorization', `Bearer ${await token(ADMIN)}`)
+      .expect(200);
+    expect(tasks.body.data.items).toHaveLength(1);
+    const task = tasks.body.data.items[0] as { id: number; status: string; code: string; owner: string | null; acceptor: string | null };
+    taskId = task.id;
+    expect(task.code).toMatch(/^TK-\d{6}-\d{4}$/);
+    expect(task.status).toBe('PENDING_ACCEPT');
+    expect(task.owner).toBeTruthy();
+    expect(task.acceptor).toBeTruthy();
+  });
+
+  it('任务闭环：接单 → 勾检查项 → 提交 → 验收通过 → 自动开启第二层', async () => {
+    const detail = await http()
+      .get(`/tasks/${taskId}`)
+      .set('Authorization', `Bearer ${await token(ADMIN)}`)
+      .expect(200);
+    const assignees = detail.body.data.assignees as Array<{ userId: number; role: string }>;
+    const ownerId = assignees.find((item) => item.role === 'OWNER')!.userId;
+    const acceptorId = assignees.find((item) => item.role === 'ACCEPTOR')!.userId;
+    const ownerToken = await token(directory.get(ownerId)!.email);
+    const acceptorToken = await token(directory.get(acceptorId)!.email);
+
+    await http().post(`/tasks/${taskId}/accept`).set('Authorization', `Bearer ${ownerToken}`).expect(201);
+
+    for (const item of detail.body.data.checklists as Array<{ id: number }>) {
+      await http()
+        .post(`/tasks/${taskId}/checklist/${item.id}`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ done: true })
+        .expect(201);
+    }
+
+    await http()
+      .post(`/tasks/${taskId}/submit`)
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({ comment: '比价材料已齐备' })
+      .expect(201);
+
+    const passed = await http()
+      .post(`/tasks/${taskId}/acceptance-pass`)
+      .set('Authorization', `Bearer ${acceptorToken}`)
+      .send({ comment: '验收通过' })
+      .expect(201);
+
+    // 本层任务全部完成 → 节点完结 → 自动开启第二层（产品中心工号 3 人）
+    expect(passed.body.data.status).toBe('DONE');
+    expect(passed.body.data.advanced).toBe(true);
+    expect(passed.body.data.nextNode).toMatchObject({ layerIndex: 2, voters: 3 });
+
+    const after = await instanceDetail(instanceId);
+    expect(after.layerIndex).toBe(2);
+    const layer2 = (after.nodes as Array<{ layerIndex: number; status: string; voters: Array<{ userId: number }> }>).find(
       (node) => node.layerIndex === 2,
     );
     expect(layer2).toBeDefined();

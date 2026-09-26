@@ -31,7 +31,18 @@
 | 0 | 需求澄清、信息架构、技术选型、数据模型草案 | `ROADMAP.md`、`docs/stage-0/*`（含 Q1–Q27 冻结基线） | ✅ 已完成，等待「进入阶段 1」指令 |
 | 1 | Prisma Schema、共享类型与枚举、种子数据 | `apps/api/prisma/schema.prisma`（44 模型/41 枚举/75 索引）、`packages/shared`（枚举+常量+DSL）、幂等 seed、脚手架、`prisma/migrations/*` | ✅ 已完成：`validate`/`generate`/typecheck 全绿；**migrate + seed 已对宝塔 PostgreSQL 16.3 实跑通过**（init 迁移 + 部分索引迁移；种子 1 租户/3 部门/8 工号成员/9 用户/5 角色/36 权限/2 模板/3 序列） |
 | 2 | 后端核心：Auth、Org、Workflow、VoteEngine、NodeStateMachine、RuleEngine、**投票结论（VoteConclusion）** | 可运行的 API + 单测（计票/全员表态/结论/状态机/规则求值） | ✅ **已完成并已对真实库验收**：Auth（JWT + 三级守卫）、Org、Workflow 模板发布与图校验、实例发起与投票人快照、投票/改票、标记缺席、人工结论与层级推进、RuleEngine 条件上报；22 条路由 + Swagger + `/health` `/metrics`；**195 个单测（16 套件）+ 11 个真实库 e2e 全绿**。任务引擎属阶段 3 |
-| 3 | 后端扩展：TaskEngine、EscalationEngine（逐级 + 上级投票复用同一 `VoteEngine`）、BullMQ、WebSocket、审计、Outbox | 队列消费者 + 网关 + 审计与发件箱 | 🚧 进行中：**EscalationEngine ✅**（目标解析 + 上报状态机 + 建单/冻结/投递即开投/逐级上溯/结论回写，23 个纯逻辑测试）；待做 TaskEngine、BullMQ 定时（超时/催办/逾期）、Socket.IO、审计与 Outbox |
+| 3 | 后端扩展：TaskEngine、EscalationEngine（逐级 + 上级投票复用同一 `VoteEngine`）、BullMQ、WebSocket、审计、Outbox | 队列消费者 + 网关 + 审计与发件箱 | 🚧 进行中：**EscalationEngine ✅**（目标解析/上报状态机/建单冻结/投递即开投/逐级上溯/结论回写）、**TaskEngine ✅**（任务状态机 + 分配解析 + 服务层与 15 个接口，真库 e2e 验证了"派任务 → 接单 → 勾检查项 → 提交 → 验收 → 自动开下一层"）；待做 BullMQ 定时（超时/催办/逾期）、Socket.IO、审计与 Outbox |
+
+### 阶段 3 实现时发现的一处文档冲突（已按最高优先级约束实现）
+
+§6.1 的状态转移表里 `VOTING + NODE_PASSED` 一行写的是「创建下一层 `InstanceNode` + 任务」，
+而 C1/C3 与总览图明确要求「**任务完成再推动下一层**」。两者不能同时成立，实现按 **C1/C3**：
+
+- 本层通过 → 按 `NodeTaskTemplate`（`triggerOn=PASS`）派任务，流程**挂起**在当前层（不建下一层节点）
+- 本层任务**全部** DONE/CANCELLED → 节点置 `DONE` → 才创建下一层节点并开投
+- 本层没有任务模板时直接推进（行为与阶段 2 一致）
+
+若后续确认要按 §6.1 的"同时创建"，改动点只有一处：`ConclusionService` 里 `heldByTasks` 的判断。
 | 4 | 前端基础：布局、主题、路由、API Client、状态管理、通用组件 | 设计系统 + 应用骨架 + 可登录 | ⏸ 未开始 |
 | 5 | 前端业务：工作台、投票中心、流程详情、任务中心、上报中心、流程设计器、统计 | 全部业务页面可交互 | ⏸ 未开始 |
 | 6 | 简化部署、联调、测试、文档、验收 | `docker-compose.dev/prod.yml`、启动与备份脚本、联调文档、验收清单 | ⏸ 未开始 |
