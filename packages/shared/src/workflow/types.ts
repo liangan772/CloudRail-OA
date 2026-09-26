@@ -116,8 +116,13 @@ export interface TallyResult {
   passSatisfied: boolean;
   rejectSatisfied: boolean;
   vetoLocked: boolean;
-  /** 系统拟判定，交由人工结论确认或改判 */
-  systemDecision: 'APPROVE' | 'REJECT';
+  /** 是否平票（同意数 = 反对数）：由调用方按 tiePolicy 决定「驳回 / 上报 / 加一票」 */
+  tieDetected: boolean;
+  /**
+   * 系统拟判定，交由人工结论确认或改判。
+   * PENDING 表示投票尚未结束（还有池内成员未表态），此时不应写入 VoteResult 的最终结论。
+   */
+  systemDecision: 'APPROVE' | 'REJECT' | 'PENDING';
   /** 是否已可进入结论阶段（全员表态 or 否决立即终结） */
   readyForConclusion: boolean;
   reason: string;
