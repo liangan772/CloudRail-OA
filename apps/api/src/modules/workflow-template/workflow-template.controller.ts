@@ -11,6 +11,7 @@ import {
   type PublishVersionInput,
   type TemplateQuery,
 } from './workflow-template.dto';
+import { createVersionSchema as createVersionBodySchema, type CreateVersionInput as CreateVersionBody } from './workflow-graph.dto';
 
 @ApiTags('workflow')
 @Controller('workflow/templates')
@@ -41,5 +42,16 @@ export class WorkflowTemplateController {
     @Body(new ZodValidationPipe(publishVersionSchema)) body: PublishVersionInput,
   ) {
     return this.templates.publishVersion(user, id, body);
+  }
+
+  @Post(':id/versions')
+  @RequirePermissions('WF_DESIGN')
+  @ApiOperation({ summary: '从既有版本克隆出新草稿版本（设计器起点）' })
+  createVersion(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body(new ZodValidationPipe(createVersionBodySchema)) body: CreateVersionBody,
+  ) {
+    return this.templates.createVersion(user, id, body);
   }
 }

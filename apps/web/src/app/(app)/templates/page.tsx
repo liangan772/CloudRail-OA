@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
 import useSWR, { useSWRConfig } from 'swr';
 import { TEMPLATE_STATUS_LABEL } from '@oa/shared';
@@ -149,6 +150,11 @@ export default function TemplatesPage() {
                       <button type="button" className="oa-button-ghost h-6 px-2" onClick={() => void publish(version.id)}>
                         发布此版本
                       </button>
+                    ) : null}
+                    {can('WF_DESIGN') && !version.publishedAt ? (
+                      <Link href={`/templates/${detail.id}/design`} className="oa-button-ghost h-6 px-2">
+                        去设计
+                      </Link>
                     ) : null}
                   </div>
                   <div className="mt-1 text-muted-foreground">
