@@ -56,7 +56,8 @@ export class NodeContextService {
 
   /** 命令式用法（无事务时自动包一层） */
   async loadStandalone(tenantId: number, instanceId: number): Promise<NodeContext> {
-    return this.prisma.$transaction((tx) => this.loadIn(tx, tenantId, instanceId));
+    // 只读场景不必开事务：直接把客户端当 tx 用，省掉一次事务开销
+    return this.loadIn(this.prisma as unknown as Tx, tenantId, instanceId);
   }
 
   private async loadIn(tx: Tx, tenantId: number, instanceId: number): Promise<NodeContext> {

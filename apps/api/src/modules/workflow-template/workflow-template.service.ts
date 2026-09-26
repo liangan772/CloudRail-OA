@@ -179,7 +179,7 @@ export class WorkflowTemplateService {
     if (problems.length > 0) throw AppError.of('RULE_INVALID', problems.join('；'));
 
     const publishedAt = new Date();
-    const result = await this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.runInTransaction(async (tx) => {
       const published = await tx.workflowVersion.update({
         where: { id: version.id },
         data: {

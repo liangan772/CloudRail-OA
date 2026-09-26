@@ -31,6 +31,6 @@ export class NumberingService {
 
   /** 无事务场景（只读试算等） */
   nextStandalone(tenantId: number, type: string): Promise<string> {
-    return this.prisma.$transaction((tx) => this.next(tx, tenantId, type));
+    return this.prisma.runInTransaction((tx) => this.next(tx, tenantId, type));
   }
 }

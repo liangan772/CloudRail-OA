@@ -34,7 +34,7 @@ export class ConclusionService {
    * 3. 改判系统拟判定必须填理由，且具备 `NODE_CONCLUDE_OVERRIDE` 权限。
    */
   async submitConclusion(user: AuthenticatedUser, instanceId: number, input: SubmitConclusionBody) {
-    return this.prisma.$transaction(async (tx) => {
+    return this.prisma.runInTransaction(async (tx) => {
       const ctx = await this.contexts.load(tx, user.tenantId, instanceId);
       if (ctx.node.status !== 'PENDING_CONCLUSION') {
         throw AppError.of('NODE_INVALID_TRANSITION', `当前节点状态为 ${ctx.node.status}，不能填写结论`);

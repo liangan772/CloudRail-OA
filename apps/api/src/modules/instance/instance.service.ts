@@ -124,7 +124,7 @@ export class InstanceService {
     const deadline = new Date(now.getTime() + timeoutHours * 3600_000);
     const layerIndex = firstNode.layerIndex ?? 1;
 
-    const created = await this.prisma.$transaction(async (tx) => {
+    const created = await this.prisma.runInTransaction(async (tx) => {
       const code = await this.numbering.next(tx, user.tenantId, 'INSTANCE');
 
       const instance = await tx.workflowInstance.create({
@@ -374,6 +374,8 @@ export class InstanceService {
       priority: instance.priority,
       layerIndex: instance.layerIndex,
       currentNodeId: instance.currentNodeId,
+      /** 上报冻结前的状态（解冻时恢复它；非冻结状态下为 null） */
+      suspendedFrom: instance.suspendedFrom,
       formData: instance.formData,
       template: instance.template,
       initiator: {

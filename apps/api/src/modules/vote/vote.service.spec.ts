@@ -152,6 +152,8 @@ function buildFake(options: { deadline?: Date; voterIds?: number[]; nodeStatus?:
     $transaction: jest.fn((arg: unknown) =>
       typeof arg === 'function' ? (arg as (t: unknown) => unknown)(tx) : Promise.all(arg as unknown[]),
     ),
+    // 生产代码统一走 runInTransaction（带宽松超时），假仓储照做
+    runInTransaction: jest.fn((fn: (t: unknown) => unknown) => fn(tx)),
   };
 
   return { prisma, tx, state };

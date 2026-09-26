@@ -38,7 +38,7 @@ export class VoteService {
   /* ---------------------------- 投票 / 改票 ---------------------------- */
 
   async castVote(user: AuthenticatedUser, instanceId: number, input: CastVoteBody) {
-    return this.prisma.$transaction(async (tx) => {
+    return this.prisma.runInTransaction(async (tx) => {
       const ctx = await this.contexts.load(tx, user.tenantId, instanceId);
       const voter = ctx.voters.find((item) => item.userId === user.userId);
       if (!voter) throw AppError.of('VOTE_NOT_VOTER');
@@ -117,7 +117,7 @@ export class VoteService {
   /* ------------------------------ 缺席标记 ------------------------------ */
 
   async markAbsent(user: AuthenticatedUser, instanceId: number, input: MarkAbsentBody) {
-    return this.prisma.$transaction(async (tx) => {
+    return this.prisma.runInTransaction(async (tx) => {
       const ctx = await this.contexts.load(tx, user.tenantId, instanceId);
       const targets = new Set(input.userIds);
 
@@ -175,7 +175,7 @@ export class VoteService {
   }
 
   async revokeAbsent(user: AuthenticatedUser, instanceId: number, targetUserId: number, input: RevokeAbsentBody) {
-    return this.prisma.$transaction(async (tx) => {
+    return this.prisma.runInTransaction(async (tx) => {
       const ctx = await this.contexts.load(tx, user.tenantId, instanceId);
       const target = ctx.voters.find((voter) => voter.userId === targetUserId);
       if (!target) throw AppError.of('SYS_NOT_FOUND', '该用户不是本层投票人');
@@ -356,7 +356,15 @@ export class VoteService {
       decision.events.includes('VETO_TERMINATE') || (decision.allStated && decision.readyForConclusion);
     let escalationResult: EscalationEvaluationResult | null = null;
 
-    if (wouldEnterConclusion) {
+    /**
+     * 只在"普通层级节点"上评估上报规则。
+     *
+     * 上级投票节点复用来源层的配置（同一个 `WorkflowNode`），因此同一条规则会再次命中；
+     * 若在这里再建一张上报单，就会对已处于 ESCALATED 的节点触发 ESCALATE —— 死循环。
+     * 上级投票的僵局与平票走 §6.4 的 `UPGRADED`（继续上溯一级），由 EscalationEngine 处理。
+     */
+    const isUpwardVoteNode = ctx.node.escalationId != null;
+    if (wouldEnterConclusion && !isUpwardVoteNode) {
       /**
        * 只有"看数据条件"的触发源在出结论这一刻适用。
        * `QUORUM_NOT_MET` / `TASK_OVERDUE` / `TIMEOUT` / 结论超时这类由各自场景或定时任务触发，

@@ -64,8 +64,14 @@ async function castVotesFor(
     const res = await http()
       .post(`/instances/${instanceId}/votes`)
       .set('Authorization', `Bearer ${await token(account.email)}`)
-      .send({ decision, comment: `${account.name} ${decision === 'APPROVE' ? '同意' : '反对'}` })
-      .expect(201);
+      .send({ decision, comment: `${account.name} ${decision === 'APPROVE' ? '同意' : '反对'}` });
+    if (res.status !== 201) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[e2e] 投票失败 instance=${instanceId} voter=${account.email} -> ${res.status} ${JSON.stringify(res.body)}`,
+      );
+    }
+    expect(res.status).toBe(201);
     last = res;
   }
   return last!;
@@ -369,12 +375,23 @@ describe('真实库 e2e · 全链路', () => {
     );
     expect(votes.body.data.nodeStatus).toBe('PENDING_CONCLUSION');
 
+    // 上级投票节点出结论时，上报单状态应同步推进到「待上级填结论」
+    const beforeConclusion = await http()
+      .get(`/escalations/${overLimitEscalationId}`)
+      .set('Authorization', `Bearer ${await token(ADMIN)}`)
+      .expect(200);
+    expect(beforeConclusion.body.data.status).toBe('PENDING_CONCLUSION');
+
     // 上级结论：同意继续 → 解冻原流程
     const concluded = await http()
       .post(`/escalations/${overLimitEscalationId}/conclusion`)
       .set('Authorization', `Bearer ${await token(LIJING)}`)
-      .send({ opinion: 'CONTINUE', content: '产品中心同意继续，按原流程执行' })
-      .expect(201);
+      .send({ opinion: 'CONTINUE', content: '产品中心同意继续，按原流程执行' });
+    if (concluded.status !== 201) {
+      // eslint-disable-next-line no-console
+      console.log('[e2e] 上级结论失败：', concluded.status, JSON.stringify(concluded.body));
+    }
+    expect(concluded.status).toBe(201);
 
     expect(concluded.body.data.writeBackAction).toBe('CONTINUE');
     expect(concluded.body.data.escalationStatus).toBe('CLOSED');

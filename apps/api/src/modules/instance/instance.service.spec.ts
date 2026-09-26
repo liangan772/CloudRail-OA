@@ -118,6 +118,8 @@ function buildMocks() {
     $transaction: jest.fn((arg: unknown) =>
       typeof arg === 'function' ? (arg as (t: unknown) => unknown)(tx) : Promise.all(arg as unknown[]),
     ),
+    // 写事务统一走 runInTransaction（带宽松超时）
+    runInTransaction: jest.fn((fn: (t: unknown) => unknown) => fn(tx)),
   };
 
   return { prisma, tx };

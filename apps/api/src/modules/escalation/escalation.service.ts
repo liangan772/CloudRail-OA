@@ -224,7 +224,7 @@ export class EscalationService {
    * 并把该节点按状态机推到 DONE —— 这样上级那一步在数据上依然是一次完整投票，而不是特殊通道。
    */
   async submitConclusion(user: AuthenticatedUser, escalationId: number, input: SubmitEscalationConclusionInput) {
-    return this.prisma.$transaction(async (tx) => {
+    return this.prisma.runInTransaction(async (tx) => {
       const escalation = await tx.escalation.findFirst({
         where: { id: escalationId, tenantId: user.tenantId },
         select: {
@@ -294,7 +294,7 @@ export class EscalationService {
 
       const sourceNode = await tx.instanceNode.findFirst({
         where: { id: escalation.sourceId },
-        select: { id: true, layerIndex: true, status: true, round: true },
+        select: { id: true, nodeId: true, layerIndex: true, status: true, round: true },
       });
 
       let instanceStatus: string;
@@ -332,7 +332,9 @@ export class EscalationService {
           const reopen = transitionNode({ status: sourceNode.status as never }, 'RESUME');
           if (!reopen.ok) throw AppError.fromDef(reopen.error, reopen.reason);
           const isReturn = writeBackAction === 'RETURN';
-          const nextRound = isReturn ? sourceNode.round + 1 : sourceNode.round;
+          const nextRound = isReturn
+            ? await this.nextRoundFor(tx, escalation.instanceId!, sourceNode.nodeId)
+            : sourceNode.round;
           await tx.instanceNode.update({
             where: { id: sourceNode.id },
             data: {
@@ -405,7 +407,7 @@ export class EscalationService {
 
   /** 继续上报上一级（D9）：平票 / 僵局 / 结论超时后的逐级上溯 */
   async upgrade(user: AuthenticatedUser, escalationId: number, reason: string) {
-    return this.prisma.$transaction(async (tx) => {
+    return this.prisma.runInTransaction(async (tx) => {
       const escalation = await tx.escalation.findFirst({
         where: { id: escalationId, tenantId: user.tenantId },
         select: {
@@ -681,6 +683,13 @@ export class EscalationService {
     const timeoutHours = rule?.timeoutHours ?? params.timeoutHours;
     const now = new Date();
 
+    /**
+     * `InstanceNode` 的唯一键是 `(instanceId, nodeId, round)`。
+     * 上级投票复用来源层的 `WorkflowNode`（D7：同样的投票规则），所以 nodeId 相同，
+     * round 必须取"该节点在本实例内的下一个轮次"，否则撞唯一约束。
+     */
+    const round = await this.nextRoundFor(tx, params.instanceId, params.sourceNodeKey);
+
     const node = await tx.instanceNode.create({
       data: {
         tenantId: params.tenantId,
@@ -689,7 +698,7 @@ export class EscalationService {
         type: 'VOTE',
         status: 'VOTING',
         layerIndex,
-        round: 1,
+        round,
         startedAt: now,
         deadline: new Date(now.getTime() + timeoutHours * 3600_000),
         escalationId: params.escalationId,
@@ -771,6 +780,15 @@ export class EscalationService {
         data: { status: concluded.status, endedAt: new Date(), conclusionStatus: 'SUBMITTED' },
       });
     }
+  }
+
+  /** 该节点在本实例内的下一个轮次（唯一键是 instanceId + nodeId + round） */
+  private async nextRoundFor(tx: Tx, instanceId: number, nodeId: number): Promise<number> {
+    const maxRound = await tx.instanceNode.aggregate({
+      where: { instanceId, nodeId },
+      _max: { round: true },
+    });
+    return (maxRound._max.round ?? 0) + 1;
   }
 
   private async primaryDeptOf(
