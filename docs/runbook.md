@@ -57,7 +57,72 @@ docker compose --env-file .env -f docker/docker-compose.prod.yml exec postgres \
 若用宝塔自带的 Nginx 做反代（这台机器上已有），可以不起 Caddy：
 域名 → `127.0.0.1:3000`，另外把 `/api` 与 `/ws` 反代到 `127.0.0.1:3001`（`/ws` 需要 upgrade 头）。
 
-## 3. 日常检查
+## 3. 升级到新版本
+
+```bash
+cd CloudRail-OA
+
+# ① 先看这次要上的是什么
+git pull
+git log --oneline -5
+
+# ② 重建并重启。api 与 web 两个镜像都会变，必须 --build
+#    —— 只 restart 不会带上新代码，也不会装新依赖（依赖是在构建期 pnpm install 的）
+docker compose --env-file .env -f docker/docker-compose.prod.yml up -d --build
+
+# ③ 跑种子（幂等）。它会补新增权限点，并清理代码里已删除的孤儿权限点
+docker compose --env-file .env -f docker/docker-compose.prod.yml exec api pnpm db:seed
+
+# ④ 验证
+curl -s localhost:3001/health
+docker compose --env-file .env -f docker/docker-compose.prod.yml exec postgres \
+  psql -U oa -d oa -c "select count(*) as permissions from permissions;"
+```
+
+### 什么时候必须做哪一步
+
+| 改动类型 | `git pull` | `--build` 重建 | `db:seed` |
+| --- | --- | --- | --- |
+| 前端 / 后端代码 | ✅ | ✅ | — |
+| `package.json` / `pnpm-lock.yaml`（新增依赖） | ✅ | ✅ **必须** | — |
+| `packages/shared` 的权限点或枚举 | ✅ | ✅ | ✅ **必须**（权限点靠种子入库） |
+| `prisma/schema.prisma` | ✅ | ✅ | 视需要 |
+
+**迁移不需要手工执行**：`api` 容器的启动命令是
+`pnpm --filter @oa/api db:deploy && node apps/api/dist/main.js`，
+每次重启都会先应用未执行的迁移（已应用的是 no-op）。
+
+### 升级前先备份
+
+```bash
+pnpm backup     # 产物在 docker/backups/
+```
+
+### 回滚
+
+```bash
+git log --oneline -5                 # 找到上一个版本
+git checkout <上一个 commit>
+docker compose --env-file .env -f docker/docker-compose.prod.yml up -d --build
+```
+
+数据库**不会**跟着回滚。但本项目大部分数据是「代码定义 + 种子写入」（权限点、角色、模板、组织），
+所以回滚代码后重跑一次 `db:seed` 通常能把**配置数据**带回旧状态。
+**流程数据（实例 / 投票 / 任务 / 上报）回不来** —— 那要靠 `pnpm restore`。
+
+### ⚠️ 两个不可逆点
+
+1. **`db:seed` 会覆盖手工调整过的内置角色权限**（`seedRoles` 是先清后建）。想保留自定义配置请新建角色。
+2. **`prunePermissions` 会真删权限点**（代码里已删除的那些）。第一次升级务必看一眼输出：
+
+   ```
+   ⚠ 清理孤儿权限点 2 个：LEGACY_APPROVE、OLD_EXPORT
+     受影响角色（关联已一并移除）：部门审核员
+   ```
+
+   数量与预期不符就**先停下来**，把输出发出来再继续。
+
+## 4. 日常检查
 
 | 检查 | 命令 / 位置 | 期望 |
 | --- | --- | --- |
@@ -71,7 +136,7 @@ docker compose --env-file .env -f docker/docker-compose.prod.yml exec postgres \
 `redis` 不可用时系统**不降级功能**：后台任务自动退回进程内定时器（5s/5min 周期），
 只是失去多实例安全与集中可观测性。
 
-## 4. 备份与恢复
+## 5. 备份与恢复
 
 ```bash
 # 备份（容器在跑就用容器里的 pg_dump，产物在 docker/backups/）
@@ -84,7 +149,7 @@ pnpm restore docker/backups/oa-20260926120000.dump --yes
 建议加一条计划任务（面板计划任务或 crontab）：`0 3 * * * cd /path/to/repo && pnpm backup`，
 与 `.env` 里的 `BACKUP_CRON` 保持一致口径。
 
-## 5. 上线前必做：审计日志按月分区
+## 6. 上线前必做：审计日志按月分区
 
 审计日志保留 3 年，单表会很大。分区必须在**有数据前**做（转换已有表要停机重建），
 所以放在上线前执行，命令如下（把 `<当月>` 换成实际上线月份，例如 `2026_10`）：
@@ -123,7 +188,7 @@ CREATE TABLE IF NOT EXISTS audit_logs_<YYYY_MM> PARTITION OF audit_logs
   FOR VALUES FROM ('<YYYY-MM-01>') TO ('<下月-01>');
 ```
 
-## 6. 常见故障
+## 7. 常见故障
 
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
@@ -138,7 +203,7 @@ CREATE TABLE IF NOT EXISTS audit_logs_<YYYY_MM> PARTITION OF audit_logs
 | `db:seed` 报 `Error: Cannot find module './data/org'`（`ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL ... db:seed`） | `.dockerignore` / `.gitignore` 里曾有**未锚定**的 `data` 规则，把源码目录 `apps/api/prisma/seed/data/` 一起忽略了：仓库里没这三个文件、镜像构建上下文里也没有 | 已修（两条规则都改成 `/data`）。确认 `apps/api/prisma/seed/data/{org,roles,templates}.ts` 已入库，再 `docker compose --env-file .env -f docker/docker-compose.prod.yml up -d --build api` 重建镜像 |
 | `db:seed` 报 `ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL`，但看不到真正原因 | 这只是 pnpm 的外层包装，真实错误在它**上面几行**（seed 自己会打印 `✘ 种子数据失败：<error>`） | 绕开包装层直接看：`docker compose ... exec api pnpm --filter @oa/api exec tsx prisma/seed/index.ts` |
 
-## 7. 数据清理
+## 8. 数据清理
 
 e2e 或联调会在演示租户留下流程数据（单号 `OA-` / `ES-`）。清理：
 
@@ -149,7 +214,7 @@ pnpm --filter @oa/api db:cleanup -- --yes      # 执行
 
 只删业务记录，不动组织/用户/角色/模板/单号序列（要重置序列加 `--reset-sequences`）。
 
-## 8. 卸载 / 彻底清理
+## 9. 卸载 / 彻底清理
 
 按需要选清理深度，**从 ① 往下逐级加重**：
 

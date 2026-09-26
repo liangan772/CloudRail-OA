@@ -53,7 +53,7 @@
 - [ ] 审计日志有记录（`select action, count(*) from audit_logs group by 1`）
 - [ ] Outbox 无积压（SENT 占绝大多数，DEAD 为 0）
 - [ ] `pnpm --filter @oa/api db:cleanup` 预演能列出流程数据，`--yes` 后清空且组织/模板仍在
-- [ ] 上线前执行运维手册 §5 的审计分区 SQL，并确认新分区按月自动创建
+- [ ] 上线前执行运维手册 §6 的审计分区 SQL，并确认新分区按月自动创建
 
 ## H. 已知未做（验收时不算缺陷，但要知道）
 
