@@ -24,7 +24,15 @@ openssl rand -hex 32
 
 # ⚠️ 必须显式 --env-file .env：compose 的变量替换读的是「项目目录下的 .env」，
 #    而项目目录默认是 compose 文件所在目录（docker/），不是仓库根目录
-docker compose --env-file .env -f docker/docker-compose.prod.yml up -d --build
+#
+# ⚠️ 8G 及以下的机器：不要用 `up -d --build`（它会**并行**构建 api 与 web 两个镜像，
+#    每个都要 pnpm install + 编译，再叠加已运行的 postgres/redis，极易把整机打进
+#    swap 颠簸 → SSH 无响应）。改成下面三步：先建镜像（串行），再起容器。
+docker compose --env-file .env -f docker/docker-compose.prod.yml build api
+docker compose --env-file .env -f docker/docker-compose.prod.yml build web
+docker compose --env-file .env -f docker/docker-compose.prod.yml up -d
+# 内存 ≥16G 时才可以用一行搞定：
+#   docker compose --env-file .env -f docker/docker-compose.prod.yml up -d --build
 # 需要自动 HTTPS：
 #   OA_DOMAIN=oa.example.com ACME_EMAIL=you@example.com \
 #   docker compose --env-file .env -f docker/docker-compose.prod.yml --profile tls up -d
@@ -68,7 +76,15 @@ git log --oneline -5
 
 # ② 重建并重启。api 与 web 两个镜像都会变，必须 --build
 #    —— 只 restart 不会带上新代码，也不会装新依赖（依赖是在构建期 pnpm install 的）
-docker compose --env-file .env -f docker/docker-compose.prod.yml up -d --build
+#
+#    ⚠️ 8G 及以下机器：串行构建两个镜像，别用 `up -d --build`（并行构建会打穿内存）。
+#       构建前先停掉旧容器，把内存让给构建过程 —— 这也是「构建时整机无响应」的解药。
+docker compose --env-file .env -f docker/docker-compose.prod.yml stop api web
+docker compose --env-file .env -f docker/docker-compose.prod.yml build api
+docker compose --env-file .env -f docker/docker-compose.prod.yml build web
+docker compose --env-file .env -f docker/docker-compose.prod.yml up -d
+#    内存 ≥16G 时可以用一行：
+#      docker compose --env-file .env -f docker/docker-compose.prod.yml up -d --build
 
 # ③ 跑种子（幂等）。它会补新增权限点，并清理代码里已删除的孤儿权限点
 docker compose --env-file .env -f docker/docker-compose.prod.yml exec api pnpm db:seed
@@ -103,7 +119,10 @@ pnpm backup     # 产物在 docker/backups/
 ```bash
 git log --oneline -5                 # 找到上一个版本
 git checkout <上一个 commit>
-docker compose --env-file .env -f docker/docker-compose.prod.yml up -d --build
+# 同样串行构建（8G 及以下机器），避免并行构建打穿内存
+docker compose --env-file .env -f docker/docker-compose.prod.yml build api
+docker compose --env-file .env -f docker/docker-compose.prod.yml build web
+docker compose --env-file .env -f docker/docker-compose.prod.yml up -d
 ```
 
 数据库**不会**跟着回滚。但本项目大部分数据是「代码定义 + 种子写入」（权限点、角色、模板、组织），
@@ -202,6 +221,8 @@ CREATE TABLE IF NOT EXISTS audit_logs_<YYYY_MM> PARTITION OF audit_logs
 | 迁移未应用 | 手工迁移文件没跑 | `pnpm --filter @oa/api db:deploy` |
 | `db:seed` 报 `Error: Cannot find module './data/org'`（`ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL ... db:seed`） | `.dockerignore` / `.gitignore` 里曾有**未锚定**的 `data` 规则，把源码目录 `apps/api/prisma/seed/data/` 一起忽略了：仓库里没这三个文件、镜像构建上下文里也没有 | 已修（两条规则都改成 `/data`）。确认 `apps/api/prisma/seed/data/{org,roles,templates}.ts` 已入库，再 `docker compose --env-file .env -f docker/docker-compose.prod.yml up -d --build api` 重建镜像 |
 | `db:seed` 报 `ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL`，但看不到真正原因 | 这只是 pnpm 的外层包装，真实错误在它**上面几行**（seed 自己会打印 `✘ 种子数据失败：<error>`） | 绕开包装层直接看：`docker compose ... exec api pnpm --filter @oa/api exec tsx prisma/seed/index.ts` |
+| **构建时整机无响应 / SSH 卡死 / 半天没反应**（8G 及以下机器） | `up -d --build` 会**并行**构建 api 与 web 两个镜像：每个都跑 `pnpm install` + 编译（nest 的 tsc 单进程 1~2G、next 的 webpack 若干 G），再叠加已在跑的 postgres/redis/旧容器 → 越过物理内存触发 **swap 颠簸**，整机看起来像死机 | ① 别用 `up -d --build`，改成 `stop api web` → `build api` → `build web` → `up -d`（串行，见 §2/§3）；② 镜像里已给 Node 堆封顶（`BUILD_NODE_HEAP_MB`，默认 1536MB），必要时调更小：`docker compose ... build --build-arg BUILD_NODE_HEAP_MB=1024 api`；③ 构建前先 `docker compose ... stop api web` 把内存让出来；④ 有条件就加 swap：`fallocate -l 4G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile` |
+| 构建卡在 `pnpm install` 特别久 | 磁盘 IO 或网络慢；容器内解压大量小文件很吃资源 | 属正常现象，耐心等；可用 `--child-concurrency=1`（镜像里已加）降低并发压力 |
 
 ## 8. 数据清理
 

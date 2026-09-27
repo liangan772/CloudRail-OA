@@ -47,6 +47,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # ⚠️ 运行时内存上限。8G 机器上构建期最容易打穿，运行期给个天花板做兜底：
+    # 万一有内存泄漏，是被 Docker 按 limit 杀掉重启，而不是把整机拖进 swap 颠簸。
+    # 注意：limit 不等于预分配，空闲时不会占住这么多。
+    mem_limit: ${API_MEM_LIMIT:-768m}
     environment:
       NODE_ENV: production
       TZ: ${TZ:-Asia/Shanghai}
@@ -82,6 +86,8 @@ services:
     restart: always
     depends_on:
       - api
+    # 运行时内存上限（同样大于镜像里的 --max-old-space-size，见 apps/web/Dockerfile）
+    mem_limit: ${WEB_MEM_LIMIT:-1024m}
     environment:
       NODE_ENV: production
       TZ: ${TZ:-Asia/Shanghai}

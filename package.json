@@ -9,7 +9,8 @@
   "scripts": {
     "setup": "node scripts/setup.mjs",
     "dev": "turbo run dev --parallel",
-    "build": "turbo run build",
+    "build": "turbo run build --concurrency=1",
+    "build:parallel": "turbo run build",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
